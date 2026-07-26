@@ -26,21 +26,14 @@ try {
     }
 
     $skeletonBytes = [System.IO.File]::ReadAllBytes($skeletonFile.FullName)
-    $skeletonText = [System.Text.Encoding]::ASCII.GetString($skeletonBytes)
-    $validNames = [System.Collections.Generic.HashSet[string]]::new()
-    foreach ($match in [regex]::Matches(
-        $skeletonText,
-        '[a-zA-Z0-9][a-zA-Z0-9_]+'
-    )) {
-        [void]$validNames.Add($match.Value)
-    }
+    $skeletonText = [System.Text.Encoding]::UTF8.GetString($skeletonBytes)
 
     $lines = [System.IO.File]::ReadAllLines($atlasFile.FullName)
     $newLines = [System.Collections.Generic.List[string]]::new()
     $removed = 0
     $index = 0
 
-    function Test-IsRegionHeader {
+    function Test-IsAtlasEntryHeader {
         param(
             [Parameter(Mandatory)]
             [string]$Line
@@ -54,9 +47,18 @@ try {
         }
 
         $candidate = $Line.Trim()
+        return $candidate -notmatch ':'
+    }
+
+    function Test-IsRegionHeader {
+        param(
+            [Parameter(Mandatory)]
+            [string]$Line
+        )
+
         return (
-            $candidate -notmatch ':' -and
-            $candidate -notmatch '\.(png|jpe?g|webp)$'
+            (Test-IsAtlasEntryHeader -Line $Line) -and
+            $Line.Trim() -notmatch '\.(png|jpe?g|webp)$'
         )
     }
 
@@ -66,7 +68,10 @@ try {
 
         if (
             (Test-IsRegionHeader -Line $line) -and
-            -not $validNames.Contains($trimmed)
+            $skeletonText.IndexOf(
+                $trimmed,
+                [System.StringComparison]::Ordinal
+            ) -lt 0
         ) {
             Write-Host "  DEL: $trimmed"
             $removed++
@@ -74,10 +79,7 @@ try {
 
             while (
                 $index -lt $lines.Count -and
-                (
-                    [string]::IsNullOrWhiteSpace($lines[$index]) -or
-                    [char]::IsWhiteSpace($lines[$index][0])
-                )
+                -not (Test-IsAtlasEntryHeader -Line $lines[$index])
             ) {
                 $index++
             }
@@ -95,10 +97,12 @@ try {
             "Remove $removed unused atlas region(s)"
         )) {
             if ($CreateBackup) {
-                Copy-Item `
-                    -LiteralPath $atlasFile.FullName `
-                    -Destination "$($atlasFile.FullName).bak" `
-                    -Force
+                $backupPath = "$($atlasFile.FullName).bak"
+                if (-not (Test-Path -LiteralPath $backupPath)) {
+                    Copy-Item `
+                        -LiteralPath $atlasFile.FullName `
+                        -Destination $backupPath
+                }
             }
 
             [System.IO.File]::WriteAllLines($atlasFile.FullName, $newLines)

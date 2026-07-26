@@ -3,8 +3,12 @@
 This optional utility removes atlas regions whose names do not appear in the
 matching Spine skeleton binary.
 
-Because the comparison is heuristic, the cleaner creates a `.bak` copy beside
-each changed atlas by default. Use `-WhatIf` to preview changes without writing.
+The cleaner compares each complete atlas region name with the UTF-8 strings in
+the matching skeleton. Region names containing spaces are supported. When an
+unreferenced region is removed, its complete property block is removed with it.
+
+The cleaner creates a `.bak` copy beside each changed atlas by default and never
+overwrites an existing backup. Use `-WhatIf` to preview changes without writing.
 
 ```powershell
 .\Clean-AllAtlases.ps1
