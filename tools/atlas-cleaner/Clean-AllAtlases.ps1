@@ -1,9 +1,7 @@
 # Batch-process all character folders in a single session.
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$ResourceDirectory = (
-        Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'res'
-    ),
+    [string]$ResourceDirectory,
 
     [bool]$CreateBackup = $true
 )
@@ -11,7 +9,24 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$cleanScript = Join-Path $PSScriptRoot 'Clean-Atlas.ps1'
+$scriptDirectory = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptDirectory)) {
+    $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+
+if ([string]::IsNullOrWhiteSpace($scriptDirectory)) {
+    throw 'Unable to determine the atlas-cleaner script directory.'
+}
+
+if ([string]::IsNullOrWhiteSpace($ResourceDirectory)) {
+    $repositoryRoot = [System.IO.Path]::GetFullPath(
+        (Join-Path $scriptDirectory '..\..')
+    )
+    $ResourceDirectory = Join-Path $repositoryRoot 'res'
+}
+
+$ResourceDirectory = [System.IO.Path]::GetFullPath($ResourceDirectory)
+$cleanScript = Join-Path $scriptDirectory 'Clean-Atlas.ps1'
 if (-not (Test-Path -LiteralPath $ResourceDirectory -PathType Container)) {
     throw "Resource directory does not exist: $ResourceDirectory"
 }
