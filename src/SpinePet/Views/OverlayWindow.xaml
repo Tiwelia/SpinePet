@@ -8,9 +8,17 @@
         ShowInTaskbar="False"
         ResizeMode="NoResize"
         ShowActivated="False">
-    <Grid Background="#883A3A40"
+    <Grid Background="#33202A37"
           MouseLeftButtonDown="OnPreviewMouseLeftButtonDown"
           MouseLeftButtonUp="OnPreviewMouseLeftButtonUp"
           MouseMove="OnPreviewMouseMove"
-          MouseLeave="OnPreviewMouseLeave" />
+          MouseLeave="OnPreviewMouseLeave">
+        <Rectangle Margin="14"
+                   RadiusX="10"
+                   RadiusY="10"
+                   Stroke="#668B5CF6"
+                   StrokeThickness="1"
+                   StrokeDashArray="5 4"
+                   IsHitTestVisible="False" />
+    </Grid>
 </Window>

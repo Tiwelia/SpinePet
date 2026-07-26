@@ -1,5 +1,19 @@
-bin/
-obj/
-log/
+**/bin/
+**/obj/
+.vs/
+.idea/
+.vscode/
+
+# Local runtime data
+/res/
+/log/
 errors.txt
 debug-*.md
+
+# User-specific files
+*.user
+*.suo
+
+# OS metadata
+.DS_Store
+Thumbs.db

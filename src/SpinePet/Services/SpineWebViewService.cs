@@ -1,12 +1,13 @@
 using System.IO;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
+using SpinePet.Infrastructure;
 
 namespace SpinePet.Services;
 
 public static class SpineWebViewService
 {
-    public const string VirtualHost = "spinepet.local";
+    private const string VirtualHost = "spinepet.local";
 
     private static readonly Lazy<Task<CoreWebView2Environment>> SharedWebViewEnvironment =
         new(CreateSharedWebViewEnvironment);
@@ -16,13 +17,17 @@ public static class SpineWebViewService
         EventHandler<CoreWebView2WebMessageReceivedEventArgs> webMessageHandler)
     {
         if (webView.CoreWebView2 != null)
+        {
             return;
+        }
 
-        var env = await SharedWebViewEnvironment.Value;
-        await webView.EnsureCoreWebView2Async(env);
-        var core = webView.CoreWebView2;
+        CoreWebView2Environment environment = await SharedWebViewEnvironment.Value;
+        await webView.EnsureCoreWebView2Async(environment);
+        CoreWebView2? core = webView.CoreWebView2;
         if (core == null)
+        {
             return;
+        }
 
         webView.DefaultBackgroundColor = System.Drawing.Color.Transparent;
         core.Settings.AreDefaultScriptDialogsEnabled = false;
@@ -32,60 +37,27 @@ public static class SpineWebViewService
         core.WebMessageReceived += webMessageHandler;
         core.SetVirtualHostNameToFolderMapping(
             VirtualHost,
-            FindProjectRoot(),
+            AppPaths.ProjectRoot,
             CoreWebView2HostResourceAccessKind.Allow);
-        core.Navigate($"https://{VirtualHost}/src/SpinePet/www/pet.html");
+        core.Navigate(
+            $"https://{VirtualHost}/{AppPaths.RendererPageRelativePath}");
     }
 
     public static Task WarmupEnvironmentAsync() => SharedWebViewEnvironment.Value;
 
     public static string ToVirtualUrl(string filePath)
     {
-        var root = FindProjectRoot().Replace('\\', '/').TrimEnd('/');
-        var normalized = filePath.Replace('\\', '/');
-        var relative = normalized.StartsWith(root, StringComparison.OrdinalIgnoreCase)
-            ? normalized.Substring(root.Length).TrimStart('/')
+        string root = AppPaths.ProjectRoot.Replace('\\', '/').TrimEnd('/');
+        string normalized = filePath.Replace('\\', '/');
+        string relative = normalized.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+            ? normalized[root.Length..].TrimStart('/')
             : normalized;
         return $"https://{VirtualHost}/{relative}";
     }
 
-    public static string FindProjectRoot()
-    {
-        var dir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
-        while (dir != null)
-        {
-            if (Directory.Exists(Path.Combine(dir.FullName, "res")) &&
-                Directory.Exists(Path.Combine(dir.FullName, "src")))
-                return dir.FullName;
-            dir = dir.Parent;
-        }
-
-        return AppDomain.CurrentDomain.BaseDirectory;
-    }
-
-    public static string FindResPath() => Path.Combine(FindProjectRoot(), "res");
-
-    public static void AppendLog(string owner, string message)
-    {
-        try
-        {
-            var logDirectory = Path.Combine(FindProjectRoot(), "log");
-            Directory.CreateDirectory(logDirectory);
-            var logPath = Path.Combine(logDirectory, $"spinepet-{DateTime.Now:yyyyMMdd}.log");
-            var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{owner}] {message}{Environment.NewLine}";
-            File.AppendAllText(logPath, line);
-        }
-        catch
-        {
-        }
-    }
-
     private static Task<CoreWebView2Environment> CreateSharedWebViewEnvironment()
     {
-        var userDataFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SpinePet",
-            "WebView2");
+        string userDataFolder = Path.Combine(AppPaths.LocalDataDirectory, "WebView2");
         Directory.CreateDirectory(userDataFolder);
         return CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
     }

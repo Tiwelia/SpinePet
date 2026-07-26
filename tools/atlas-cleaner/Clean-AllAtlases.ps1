@@ -1,0 +1,37 @@
+# Batch-process all character folders in a single session.
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [string]$ResourceDirectory = (
+        Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'res'
+    ),
+
+    [bool]$CreateBackup = $true
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$cleanScript = Join-Path $PSScriptRoot 'Clean-Atlas.ps1'
+if (-not (Test-Path -LiteralPath $ResourceDirectory -PathType Container)) {
+    throw "Resource directory does not exist: $ResourceDirectory"
+}
+
+$folders = Get-ChildItem -LiteralPath $ResourceDirectory -Directory |
+    Where-Object {
+        (Get-ChildItem -LiteralPath $_.FullName -Filter '*.atlas') -and
+        (Get-ChildItem -LiteralPath $_.FullName -Filter '*.skel') -and
+        (Get-ChildItem -LiteralPath $_.FullName -Filter '*.png')
+    }
+
+$total = 0
+foreach ($folder in $folders) {
+    Write-Host "--- $($folder.Name) ---"
+    & $cleanScript `
+        -Folder $folder.FullName `
+        -CreateBackup $CreateBackup `
+        -WhatIf:$WhatIfPreference
+    $total++
+}
+
+Write-Host ''
+Write-Host "Done. Processed $total folder(s)."

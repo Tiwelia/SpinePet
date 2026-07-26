@@ -1,16 +1,16 @@
 using System.Windows;
 using System.Windows.Input;
 using SpinePet.Services;
+using Cursors = System.Windows.Input.Cursors;
 using MouseButtonEventArgs = System.Windows.Input.MouseButtonEventArgs;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
-using Cursors = System.Windows.Input.Cursors;
 using Point = System.Windows.Point;
 
 namespace SpinePet.Views;
 
 public partial class OverlayWindow : Window
 {
-    private readonly PetManager _petManager;
+    private readonly CharacterManager _characterManager;
     private bool _isDragArmed;
     private bool _isDragging;
     private Point _dragStartScreen;
@@ -21,10 +21,10 @@ public partial class OverlayWindow : Window
 
     public event Action<string, double, double>? CharacterMoved;
 
-    public OverlayWindow(PetManager petManager)
+    public OverlayWindow(CharacterManager characterManager)
     {
         InitializeComponent();
-        _petManager = petManager;
+        _characterManager = characterManager;
 
         Deactivated += (_, _) => StopDragging();
     }
@@ -40,16 +40,23 @@ public partial class OverlayWindow : Window
     public void ShowOverlay()
     {
         if (Width <= 0 || Height <= 0)
+        {
             return;
+        }
 
         if (!IsVisible)
+        {
             Show();
+        }
     }
 
     public void HideOverlay()
     {
         if (IsVisible)
+        {
             Hide();
+        }
+
         StopDragging();
     }
 
@@ -61,11 +68,17 @@ public partial class OverlayWindow : Window
     private void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (!MoveSelectedCharacter || string.IsNullOrEmpty(SelectedCharacterId))
+        {
             return;
+        }
 
-        var character = _petManager.Characters.FirstOrDefault(c => c.Id == SelectedCharacterId);
-        if (character == null || !_petManager.RenderHost.IsCharacterVisible(SelectedCharacterId))
+        var character = _characterManager.Characters.FirstOrDefault(
+            item => item.Id == SelectedCharacterId);
+        if (character == null ||
+            !_characterManager.RenderHost.IsCharacterVisible(SelectedCharacterId))
+        {
             return;
+        }
 
         _isDragArmed = true;
         _isDragging = false;
@@ -76,7 +89,9 @@ public partial class OverlayWindow : Window
     private void OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
         if ((!_isDragArmed && !_isDragging) || string.IsNullOrEmpty(SelectedCharacterId))
+        {
             return;
+        }
 
         if (e.LeftButton != MouseButtonState.Pressed)
         {
@@ -84,31 +99,36 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        var character = _petManager.Characters.FirstOrDefault(c => c.Id == SelectedCharacterId);
+        var character = _characterManager.Characters.FirstOrDefault(
+            item => item.Id == SelectedCharacterId);
         if (character == null)
         {
             StopDragging();
             return;
         }
 
-        var currentScreen = PointToScreen(e.GetPosition(this));
-        var delta = currentScreen - _dragStartScreen;
+        Point currentScreen = PointToScreen(e.GetPosition(this));
+        Vector delta = currentScreen - _dragStartScreen;
 
         if (!_isDragging)
         {
-            var horizontalMoved = Math.Abs(delta.X) >= SystemParameters.MinimumHorizontalDragDistance;
-            var verticalMoved = Math.Abs(delta.Y) >= SystemParameters.MinimumVerticalDragDistance;
+            bool horizontalMoved =
+                Math.Abs(delta.X) >= SystemParameters.MinimumHorizontalDragDistance;
+            bool verticalMoved =
+                Math.Abs(delta.Y) >= SystemParameters.MinimumVerticalDragDistance;
 
             if (!horizontalMoved && !verticalMoved)
+            {
                 return;
+            }
 
             _isDragging = true;
             Cursor = Cursors.SizeAll;
         }
 
-        var nextLeft = _windowStartPosition.X + delta.X;
-        var nextTop = _windowStartPosition.Y + delta.Y;
-        _petManager.RenderHost.MoveCharacter(character.Id, nextLeft, nextTop);
+        double nextLeft = _windowStartPosition.X + delta.X;
+        double nextTop = _windowStartPosition.Y + delta.Y;
+        _characterManager.RenderHost.MoveCharacter(character.Id, nextLeft, nextTop);
         CharacterMoved?.Invoke(character.Id, nextLeft, nextTop);
         e.Handled = true;
     }
@@ -121,7 +141,9 @@ public partial class OverlayWindow : Window
     private void OnPreviewMouseLeave(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed)
+        {
             StopDragging();
+        }
     }
 
     private void StopDragging()
