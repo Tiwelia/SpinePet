@@ -3,16 +3,22 @@
 .vs/
 .idea/
 .vscode/
+**/__pycache__/
 
 # Local runtime data
 /res/
+/TEST BUNDLE/
 /log/
 errors.txt
+Log.txt
 debug-*.md
+/tools/icons-downloader/internal_ids.json
+/tools/NikkeAssetUnpacker/
 
 # User-specific files
 *.user
 *.suo
+*.rar
 
 # OS metadata
 .DS_Store

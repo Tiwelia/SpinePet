@@ -199,7 +199,7 @@ public partial class MainWindow
         _characterManager.RenderHost.PlayCharacterAnimation(
             character.Id,
             SelectedAnimation,
-            loop: true);
+            repeat: true);
     }
 
     private void OnRemoveSelectedCharacter(object sender, RoutedEventArgs e)

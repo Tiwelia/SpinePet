@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using System.Windows;
 using SpinePet.Infrastructure;
 using SpinePet.Models;
 
@@ -42,6 +43,11 @@ public sealed class ConfigService
 
     internal static void Normalize(AppConfig config)
     {
+        bool migrateLegacyPositions =
+            !string.Equals(
+                config.Version,
+                AppConfig.CurrentVersion,
+                StringComparison.Ordinal);
         config.Version = AppConfig.CurrentVersion;
         config.Global ??= new GlobalConfig();
         config.Characters ??= new List<CharacterConfig>();
@@ -50,12 +56,44 @@ public sealed class ConfigService
         {
             character.ConfiguredAnimation ??= string.Empty;
             character.AdditionalTexturePaths ??= new List<string>();
+            character.ResourceType =
+                CharacterResourceTypes.Normalize(character.ResourceType);
             if (!double.IsFinite(character.AnimationSpeed) || character.AnimationSpeed <= 0)
             {
                 character.AnimationSpeed = 1.0;
             }
 
             character.AnimationSpeed = Math.Clamp(character.AnimationSpeed, 0.1, 2.0);
+        }
+
+        if (migrateLegacyPositions)
+        {
+            Rect workArea = SystemParameters.WorkArea;
+            double centerX = workArea.Left + workArea.Width / 2;
+            double feetY = workArea.Bottom - 24;
+            CharacterConfig[] visibleCharacters = config.Characters
+                .Where(character => character.Visible)
+                .ToArray();
+            for (int index = 0;
+                 index < visibleCharacters.Length;
+                 index++)
+            {
+                visibleCharacters[index].PositionX =
+                    workArea.Left +
+                    workArea.Width *
+                    (index + 1) /
+                    (visibleCharacters.Length + 1);
+                visibleCharacters[index].PositionY = feetY;
+            }
+
+            foreach (CharacterConfig character in config.Characters)
+            {
+                if (!character.Visible)
+                {
+                    character.PositionX = centerX;
+                    character.PositionY = feetY;
+                }
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using SpinePet.Services;
 using Cursors = System.Windows.Input.Cursors;
 using MouseButtonEventArgs = System.Windows.Input.MouseButtonEventArgs;
@@ -14,6 +15,7 @@ public partial class OverlayWindow : Window
     private bool _isDragArmed;
     private bool _isDragging;
     private Point _dragStartScreen;
+    private Matrix _dragScreenToDipTransform = Matrix.Identity;
     private Point _windowStartPosition;
 
     public string? SelectedCharacterId { get; set; }
@@ -83,6 +85,9 @@ public partial class OverlayWindow : Window
         _isDragArmed = true;
         _isDragging = false;
         _dragStartScreen = PointToScreen(e.GetPosition(this));
+        _dragScreenToDipTransform =
+            PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ??
+            Matrix.Identity;
         _windowStartPosition = new Point(character.PositionX, character.PositionY);
     }
 
@@ -108,7 +113,9 @@ public partial class OverlayWindow : Window
         }
 
         Point currentScreen = PointToScreen(e.GetPosition(this));
-        Vector delta = currentScreen - _dragStartScreen;
+        Vector delta =
+            _dragScreenToDipTransform.Transform(currentScreen) -
+            _dragScreenToDipTransform.Transform(_dragStartScreen);
 
         if (!_isDragging)
         {
@@ -123,6 +130,7 @@ public partial class OverlayWindow : Window
             }
 
             _isDragging = true;
+            _characterManager.RenderHost.BeginCharacterMove();
             Cursor = Cursors.SizeAll;
         }
 
@@ -148,6 +156,9 @@ public partial class OverlayWindow : Window
 
     private void StopDragging()
     {
+        if (_isDragging)
+            _characterManager.RenderHost.EndCharacterMove();
+
         _isDragArmed = false;
         _isDragging = false;
         Cursor = Cursors.Arrow;

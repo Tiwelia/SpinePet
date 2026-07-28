@@ -1,22 +1,32 @@
 using System.IO;
+using System.Diagnostics.CodeAnalysis;
+using System.Windows;
 using SpinePet.Models;
-using SpinePet.Views;
+using SpinePet.Rendering.Native;
 
 namespace SpinePet.Services;
 
 public sealed class CharacterManager
 {
     private readonly ConfigService _configService;
-    private readonly RenderHostWindow _renderHost;
+    private readonly CharacterIdentityService _identityService;
+    [SuppressMessage(
+        "Performance",
+        "CA1859:Use concrete types when possible for improved performance",
+        Justification = "The renderer backend is intentionally isolated behind this contract.")]
+    private readonly ICharacterRenderHost _renderHost;
     private readonly AppConfig _config;
     private bool _isConfigMode;
     private int _configModeVersion;
 
-    public CharacterManager(ConfigService configService)
+    public CharacterManager(
+        ConfigService configService,
+        CharacterIdentityService? identityService = null)
     {
         _configService = configService;
+        _identityService = identityService ?? new CharacterIdentityService();
         _config = configService.Load();
-        _renderHost = new RenderHostWindow();
+        _renderHost = new NativeCharacterRenderHost();
         _renderHost.SetRenderDragEnabled(_config.Global.AllowRenderDrag);
         _renderHost.CharacterScaleChanged += OnCharacterScaleChanged;
         _renderHost.CharacterAnimationsLoaded += OnCharacterAnimationsLoaded;
@@ -33,7 +43,7 @@ public sealed class CharacterManager
 
     public event Action<string, double, double>? CharacterScaleChanged;
 
-    public RenderHostWindow RenderHost => _renderHost;
+    public ICharacterRenderHost RenderHost => _renderHost;
 
     public void SetConfigMode(bool configMode)
     {
@@ -56,25 +66,54 @@ public sealed class CharacterManager
 
     public bool AddCharacter(CharacterResourceFiles resources)
     {
-        bool alreadyExists = _config.Characters.Any(character =>
+        CharacterConfig? character = _config.Characters.FirstOrDefault(character =>
             string.Equals(
                 character.SkeletonPath,
                 resources.SkeletonPath,
                 StringComparison.OrdinalIgnoreCase));
-        if (alreadyExists)
+        character ??= _config.Characters.FirstOrDefault(existing =>
+            string.Equals(
+                GetCharacterIdentity(existing).ResourceName,
+                resources.Identity.ResourceName,
+                StringComparison.OrdinalIgnoreCase));
+
+        if (character != null)
         {
+            bool shouldUpdatePaths =
+                !File.Exists(character.SkeletonPath) ||
+                string.Equals(
+                    character.ResourceType,
+                    resources.ResourceType,
+                    StringComparison.OrdinalIgnoreCase);
+            bool changed = SetIfDifferent(
+                character.Name,
+                resources.Identity.DisplayName,
+                value => character.Name = value);
+            if (shouldUpdatePaths)
+            {
+                changed |= UpdateCharacterResources(character, resources);
+            }
+
+            if (changed)
+            {
+                _configService.Save(_config);
+                CharactersChanged?.Invoke();
+            }
+
             return false;
         }
 
-        CharacterConfig character = new()
+        Rect workArea = SystemParameters.WorkArea;
+        character = new CharacterConfig
         {
-            Name = Path.GetFileNameWithoutExtension(resources.SkeletonPath),
+            Name = resources.Identity.DisplayName,
             SkeletonPath = resources.SkeletonPath,
             AtlasPath = resources.AtlasPath,
             TexturePath = resources.PrimaryTexturePath,
             AdditionalTexturePaths = resources.AdditionalTexturePaths.ToList(),
-            PositionX = 300 + Random.Shared.Next(400),
-            PositionY = 100 + Random.Shared.Next(300)
+            ResourceType = resources.ResourceType,
+            PositionX = workArea.Left + workArea.Width / 2,
+            PositionY = workArea.Bottom - 24
         };
 
         _config.Characters.Add(character);
@@ -83,11 +122,72 @@ public sealed class CharacterManager
         return true;
     }
 
+    public CharacterIdentity GetCharacterIdentity(CharacterConfig character)
+    {
+        return _identityService.Resolve(
+            character.SkeletonPath,
+            character.Name);
+    }
+
+    public string GetCharacterThumbnailPath(CharacterConfig character)
+    {
+        CharacterIdentity identity = GetCharacterIdentity(character);
+        return CharacterIconService.GetThumbnailPath(character, identity);
+    }
+
     public async Task ShowCharacterAsync(CharacterConfig character)
     {
         try
         {
             await ShowCharacterCoreAsync(character);
+        }
+        finally
+        {
+            _configService.Save(_config);
+            CharactersChanged?.Invoke();
+        }
+    }
+
+    public async Task SwitchCharacterResourcesAsync(
+        CharacterConfig character,
+        CharacterResourceFiles resources)
+    {
+        if (!string.Equals(
+            GetCharacterIdentity(character).ResourceName,
+            resources.Identity.ResourceName,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The selected resources belong to a different character skin.");
+        }
+
+        if (string.Equals(
+            character.ResourceType,
+            resources.ResourceType,
+            StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                character.SkeletonPath,
+                resources.SkeletonPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        bool wasVisible = character.Visible;
+        if (wasVisible)
+        {
+            _renderHost.RemoveCharacter(character.Id);
+        }
+
+        character.ConfiguredAnimation = string.Empty;
+        UpdateCharacterResources(character, resources);
+
+        try
+        {
+            if (wasVisible)
+            {
+                await ShowCharacterCoreAsync(character);
+            }
         }
         finally
         {
@@ -247,5 +347,60 @@ public sealed class CharacterManager
         character.PositionY = top;
         _configService.Save(_config);
         CharactersChanged?.Invoke();
+    }
+
+    private static bool UpdateCharacterResources(
+        CharacterConfig character,
+        CharacterResourceFiles resources)
+    {
+        bool changed = false;
+        changed |= SetIfDifferent(
+            character.Name,
+            resources.Identity.DisplayName,
+            value => character.Name = value);
+        changed |= SetIfDifferent(
+            character.SkeletonPath,
+            resources.SkeletonPath,
+            value => character.SkeletonPath = value);
+        changed |= SetIfDifferent(
+            character.AtlasPath,
+            resources.AtlasPath,
+            value => character.AtlasPath = value);
+        changed |= SetIfDifferent(
+            character.TexturePath,
+            resources.PrimaryTexturePath,
+            value => character.TexturePath = value);
+        changed |= SetIfDifferent(
+            character.ResourceType,
+            resources.ResourceType,
+            value => character.ResourceType = value);
+
+        if (!character.AdditionalTexturePaths.SequenceEqual(
+            resources.AdditionalTexturePaths,
+            StringComparer.OrdinalIgnoreCase))
+        {
+            character.AdditionalTexturePaths =
+                resources.AdditionalTexturePaths.ToList();
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool SetIfDifferent(
+        string currentValue,
+        string newValue,
+        Action<string> setter)
+    {
+        if (string.Equals(
+            currentValue,
+            newValue,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        setter(newValue);
+        return true;
     }
 }

@@ -13,5 +13,9 @@ overwrites an existing backup. Use `-WhatIf` to preview changes without writing.
 ```powershell
 .\Clean-AllAtlases.ps1
 .\Clean-AllAtlases.ps1 -WhatIf
-.\Clean-Atlas.ps1 -Folder E:\SpinePet\res\CharacterName
+.\Clean-Atlas.ps1 -Folder E:\SpinePet\res\CharacterName\standing
 ```
+
+`Clean-AllAtlases.ps1` searches state directories recursively.
+`Clean-Atlas.ps1` safely handles multiple skins stored in the same state
+directory by pairing each `.skel` with the atlas of the same base name.

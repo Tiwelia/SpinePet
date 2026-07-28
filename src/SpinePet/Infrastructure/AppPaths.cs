@@ -24,15 +24,10 @@ internal static class AppPaths
         ProjectRoot,
         "res");
 
-    public static string RendererPageRelativePath { get; } =
-        File.Exists(Path.Combine(
-            ProjectRoot,
-            "src",
-            "SpinePet",
-            "Web",
-            "renderer-host.html"))
-            ? "src/SpinePet/Web/renderer-host.html"
-            : "Web/renderer-host.html";
+    public static string BundleExtractorScript { get; } =
+        ResolveBundledFile(
+            Path.Combine("src", "SpinePet", "Tools", "extract_spine_bundle.py"),
+            Path.Combine("Tools", "extract_spine_bundle.py"));
 
     private static string FindProjectRoot()
     {
@@ -49,5 +44,15 @@ internal static class AppPaths
         }
 
         return AppContext.BaseDirectory;
+    }
+
+    private static string ResolveBundledFile(
+        string sourceRelativePath,
+        string outputRelativePath)
+    {
+        string sourcePath = Path.Combine(ProjectRoot, sourceRelativePath);
+        return File.Exists(sourcePath)
+            ? sourcePath
+            : Path.Combine(AppContext.BaseDirectory, outputRelativePath);
     }
 }

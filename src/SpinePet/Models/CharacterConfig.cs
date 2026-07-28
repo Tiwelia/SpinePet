@@ -14,6 +14,10 @@ public sealed class CharacterConfig
     // Multi-page atlas characters can reference additional PNG files.
     [JsonPropertyName("ExtraTexturePaths")]
     public List<string> AdditionalTexturePaths { get; set; } = new();
+
+    public string ResourceType { get; set; } =
+        CharacterResourceTypes.Standing;
+
     public double PositionX { get; set; } = 200;
     public double PositionY { get; set; } = 200;
     public double Scale { get; set; } = 1.0;

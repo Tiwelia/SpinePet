@@ -1,13 +1,19 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using SpinePet.Models;
 
 namespace SpinePet.ViewModels;
 
 public sealed class CharacterViewModel : INotifyPropertyChanged
 {
     private string _name = string.Empty;
+    private string _skinLabel = string.Empty;
+    private string _resourceType = CharacterResourceTypes.Standing;
     private string _thumbnailPath = string.Empty;
+    private bool _hasStandingResources;
+    private bool _hasAimResources;
+    private bool _hasCoverResources;
     private double _scale = 0.2;
     private double _maxScale = 1.35;
     private int _positionX = 200;
@@ -24,6 +30,68 @@ public sealed class CharacterViewModel : INotifyPropertyChanged
         get => _name;
         set => SetProperty(ref _name, value);
     }
+
+    public string SkinLabel
+    {
+        get => _skinLabel;
+        set => SetProperty(ref _skinLabel, value);
+    }
+
+    public string ResourceType
+    {
+        get => _resourceType;
+        private set
+        {
+            if (!SetProperty(ref _resourceType, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(ResourceTypeLabel));
+            OnPropertyChanged(nameof(IsStandingResources));
+            OnPropertyChanged(nameof(IsAimResources));
+            OnPropertyChanged(nameof(IsCoverResources));
+        }
+    }
+
+    public string ResourceTypeLabel =>
+        CharacterResourceTypes.GetDisplayName(ResourceType);
+
+    public bool HasStandingResources
+    {
+        get => _hasStandingResources;
+        private set => SetProperty(ref _hasStandingResources, value);
+    }
+
+    public bool HasAimResources
+    {
+        get => _hasAimResources;
+        private set => SetProperty(ref _hasAimResources, value);
+    }
+
+    public bool HasCoverResources
+    {
+        get => _hasCoverResources;
+        private set => SetProperty(ref _hasCoverResources, value);
+    }
+
+    public bool IsStandingResources =>
+        string.Equals(
+            ResourceType,
+            CharacterResourceTypes.Standing,
+            StringComparison.OrdinalIgnoreCase);
+
+    public bool IsAimResources =>
+        string.Equals(
+            ResourceType,
+            CharacterResourceTypes.Aim,
+            StringComparison.OrdinalIgnoreCase);
+
+    public bool IsCoverResources =>
+        string.Equals(
+            ResourceType,
+            CharacterResourceTypes.Cover,
+            StringComparison.OrdinalIgnoreCase);
 
     public string ThumbnailPath
     {
@@ -106,6 +174,23 @@ public sealed class CharacterViewModel : INotifyPropertyChanged
         {
             AnimationNames.Add(animationName);
         }
+    }
+
+    public void UpdateResourceTypes(
+        string currentResourceType,
+        IEnumerable<string> availableResourceTypes)
+    {
+        HashSet<string> available = new(
+            availableResourceTypes,
+            StringComparer.OrdinalIgnoreCase);
+        ResourceType =
+            CharacterResourceTypes.Normalize(currentResourceType);
+        HasStandingResources =
+            available.Contains(CharacterResourceTypes.Standing);
+        HasAimResources =
+            available.Contains(CharacterResourceTypes.Aim);
+        HasCoverResources =
+            available.Contains(CharacterResourceTypes.Cover);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

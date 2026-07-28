@@ -14,53 +14,52 @@ if (-not (Test-Path -LiteralPath $Folder -PathType Container)) {
     throw "Character directory does not exist: $Folder"
 }
 
-Push-Location -LiteralPath $Folder
-try {
-    $atlasFile = Get-ChildItem -Filter '*.atlas' | Select-Object -First 1
-    $skeletonFile = Get-ChildItem -Filter '*.skel' | Select-Object -First 1
-    $textureFile = Get-ChildItem -Filter '*.png' | Select-Object -First 1
+function Test-IsAtlasEntryHeader {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Line
+    )
 
-    if (-not $atlasFile -or -not $skeletonFile -or -not $textureFile) {
-        Write-Host '  SKIP: missing files'
-        return
+    if (
+        [string]::IsNullOrWhiteSpace($Line) -or
+        [char]::IsWhiteSpace($Line[0])
+    ) {
+        return $false
     }
 
-    $skeletonBytes = [System.IO.File]::ReadAllBytes($skeletonFile.FullName)
-    $skeletonText = [System.Text.Encoding]::UTF8.GetString($skeletonBytes)
+    $candidate = $Line.Trim()
+    return $candidate -notmatch ':'
+}
 
-    $lines = [System.IO.File]::ReadAllLines($atlasFile.FullName)
+function Test-IsRegionHeader {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Line
+    )
+
+    return (
+        (Test-IsAtlasEntryHeader -Line $Line) -and
+        $Line.Trim() -notmatch '\.(png|jpe?g|webp)$'
+    )
+}
+
+function Invoke-AtlasCleanup {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$SkeletonFile,
+
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$AtlasFile
+    )
+
+    $skeletonBytes =
+        [System.IO.File]::ReadAllBytes($SkeletonFile.FullName)
+    $skeletonText =
+        [System.Text.Encoding]::UTF8.GetString($skeletonBytes)
+    $lines = [System.IO.File]::ReadAllLines($AtlasFile.FullName)
     $newLines = [System.Collections.Generic.List[string]]::new()
     $removed = 0
     $index = 0
-
-    function Test-IsAtlasEntryHeader {
-        param(
-            [Parameter(Mandatory)]
-            [string]$Line
-        )
-
-        if (
-            [string]::IsNullOrWhiteSpace($Line) -or
-            [char]::IsWhiteSpace($Line[0])
-        ) {
-            return $false
-        }
-
-        $candidate = $Line.Trim()
-        return $candidate -notmatch ':'
-    }
-
-    function Test-IsRegionHeader {
-        param(
-            [Parameter(Mandatory)]
-            [string]$Line
-        )
-
-        return (
-            (Test-IsAtlasEntryHeader -Line $Line) -and
-            $Line.Trim() -notmatch '\.(png|jpe?g|webp)$'
-        )
-    }
 
     while ($index -lt $lines.Count) {
         $line = $lines[$index]
@@ -93,24 +92,64 @@ try {
 
     if ($removed -gt 0) {
         if ($PSCmdlet.ShouldProcess(
-            $atlasFile.FullName,
+            $AtlasFile.FullName,
             "Remove $removed unused atlas region(s)"
         )) {
             if ($CreateBackup) {
-                $backupPath = "$($atlasFile.FullName).bak"
+                $backupPath = "$($AtlasFile.FullName).bak"
                 if (-not (Test-Path -LiteralPath $backupPath)) {
                     Copy-Item `
-                        -LiteralPath $atlasFile.FullName `
+                        -LiteralPath $AtlasFile.FullName `
                         -Destination $backupPath
                 }
             }
 
-            [System.IO.File]::WriteAllLines($atlasFile.FullName, $newLines)
+            [System.IO.File]::WriteAllLines(
+                $AtlasFile.FullName,
+                $newLines
+            )
         }
     }
 
-    Write-Host "  removed=$removed"
+    Write-Host "  $($SkeletonFile.BaseName): removed=$removed"
 }
-finally {
-    Pop-Location
+
+$processed = 0
+foreach (
+    $skeletonFile in Get-ChildItem `
+        -LiteralPath $Folder `
+        -File `
+        -Filter '*.skel' |
+        Sort-Object Name
+) {
+    $atlasPath =
+        Join-Path $Folder "$($skeletonFile.BaseName).atlas"
+    $textureFiles = @(
+        Get-ChildItem `
+            -LiteralPath $Folder `
+            -File `
+            -Filter "$($skeletonFile.BaseName)*.png" |
+            Where-Object {
+                -not $_.BaseName.EndsWith(
+                    '_icon',
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
+            }
+    )
+    if (
+        -not (Test-Path -LiteralPath $atlasPath -PathType Leaf) -or
+        $textureFiles.Count -eq 0
+    ) {
+        Write-Host "  $($skeletonFile.BaseName): SKIP missing files"
+        continue
+    }
+
+    Invoke-AtlasCleanup `
+        -SkeletonFile $skeletonFile `
+        -AtlasFile (Get-Item -LiteralPath $atlasPath)
+    $processed++
+}
+
+if ($processed -eq 0) {
+    Write-Host '  SKIP: no complete resource sets'
 }

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows;
 using SpinePet.Models;
 using SpinePet.Services;
 
@@ -48,6 +49,7 @@ public sealed class ConfigServiceTests : IDisposable
         Assert.Equal("Test Character", character.Name);
         Assert.Equal(1.25, character.AnimationSpeed);
         Assert.Equal("idle", character.ConfiguredAnimation);
+        Assert.Equal(CharacterResourceTypes.Standing, character.ResourceType);
         Assert.False(File.Exists($"{configPath}.tmp"));
     }
 
@@ -82,6 +84,14 @@ public sealed class ConfigServiceTests : IDisposable
         Assert.Equal(string.Empty, character.ConfiguredAnimation);
         Assert.Equal(1.0, character.AnimationSpeed);
         Assert.Empty(character.AdditionalTexturePaths);
+        Assert.Equal(CharacterResourceTypes.Standing, character.ResourceType);
+        Assert.Equal(
+            SystemParameters.WorkArea.Left +
+            SystemParameters.WorkArea.Width / 2,
+            character.PositionX);
+        Assert.Equal(
+            SystemParameters.WorkArea.Bottom - 24,
+            character.PositionY);
     }
 
     public void Dispose()

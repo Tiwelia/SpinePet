@@ -31,16 +31,23 @@ if (-not (Test-Path -LiteralPath $ResourceDirectory -PathType Container)) {
     throw "Resource directory does not exist: $ResourceDirectory"
 }
 
-$folders = Get-ChildItem -LiteralPath $ResourceDirectory -Directory |
+$folders = Get-ChildItem `
+    -LiteralPath $ResourceDirectory `
+    -Directory `
+    -Recurse |
     Where-Object {
         (Get-ChildItem -LiteralPath $_.FullName -Filter '*.atlas') -and
         (Get-ChildItem -LiteralPath $_.FullName -Filter '*.skel') -and
         (Get-ChildItem -LiteralPath $_.FullName -Filter '*.png')
-    }
+    } |
+    Sort-Object FullName
 
 $total = 0
 foreach ($folder in $folders) {
-    Write-Host "--- $($folder.Name) ---"
+    $relativePath = $folder.FullName.Substring(
+        $ResourceDirectory.TrimEnd('\').Length
+    ).TrimStart('\')
+    Write-Host "--- $relativePath ---"
     & $cleanScript `
         -Folder $folder.FullName `
         -CreateBackup $CreateBackup `

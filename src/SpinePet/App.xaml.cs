@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using SpinePet.Infrastructure;
 using SpinePet.Models;
@@ -9,18 +10,49 @@ namespace SpinePet;
 
 public partial class App : Application
 {
+    private const string SingleInstanceMutexName =
+        @"Local\SpinePet.SingleInstance.v1";
+
     private TrayIconService? _trayIcon;
     private CharacterManager? _characterManager;
     private MainWindow? _mainWindow;
+    private EmergencyExitHotkey? _emergencyExitHotkey;
+    private readonly ManualResetEventSlim _shutdownCompleted = new(false);
+    private Mutex? _singleInstanceMutex;
+    private int _emergencyExitRequested;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
+        _singleInstanceMutex = new Mutex(
+            initiallyOwned: true,
+            SingleInstanceMutexName,
+            out bool isFirstInstance);
+        if (!isFirstInstance)
+        {
+            AppLogger.Write(nameof(App), "duplicate-instance-blocked");
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
+            Shutdown();
+            return;
+        }
+
+        _emergencyExitHotkey = new EmergencyExitHotkey(
+            RequestEmergencyExit);
+        _emergencyExitHotkey.Start();
+
         ConfigService configService = new();
-        CharacterResourceDiscoveryService resourceDiscovery = new();
-        _characterManager = new CharacterManager(configService);
-        _mainWindow = new MainWindow(_characterManager, resourceDiscovery);
+        CharacterIdentityService identityService = new();
+        CharacterResourceDiscoveryService resourceDiscovery =
+            new(identityService);
+        UnityBundleImportService bundleImporter =
+            new(identityService, resourceDiscovery);
+        _characterManager = new CharacterManager(configService, identityService);
+        _mainWindow = new MainWindow(
+            _characterManager,
+            resourceDiscovery,
+            bundleImporter);
 
         _trayIcon = new TrayIconService(
             openPanel: () => DispatchToUi(() => _mainWindow.SwitchToConfigMode()),
@@ -29,8 +61,6 @@ public partial class App : Application
             exit: () => DispatchToUi(ShutdownApplication)
         );
         _trayIcon.Initialize();
-
-        _ = WarmupWebViewEnvironmentAsync();
 
         ImportDiscoveredResources(resourceDiscovery);
         _ = RestoreCharactersAsync();
@@ -72,20 +102,6 @@ public partial class App : Application
         }
     }
 
-    private static async Task WarmupWebViewEnvironmentAsync()
-    {
-        try
-        {
-            await SpineWebViewService.WarmupEnvironmentAsync();
-        }
-        catch (Exception exception)
-        {
-            AppLogger.Write(
-                nameof(App),
-                $"webview-warmup-failed message={exception.Message}");
-        }
-    }
-
     private async Task ShowAllCharactersAsync()
     {
         if (_characterManager == null)
@@ -120,15 +136,64 @@ public partial class App : Application
         Shutdown();
     }
 
-    protected override void OnExit(ExitEventArgs e)
+    private void RequestEmergencyExit()
     {
-        if (_characterManager != null)
+        if (Interlocked.Exchange(ref _emergencyExitRequested, 1) != 0)
+            return;
+
+        AppLogger.Write(
+            nameof(App),
+            "emergency-exit-requested shortcut=Ctrl+Alt+Shift+F12");
+
+        try
         {
-            _characterManager.SaveAllState();
-            _characterManager.Close();
+            Dispatcher.BeginInvoke(ShutdownApplication);
+        }
+        catch
+        {
+            // The watchdog below still terminates a broken dispatcher.
         }
 
-        _trayIcon?.Dispose();
-        base.OnExit(e);
+        _ = Task.Run(() =>
+        {
+            if (_shutdownCompleted.Wait(TimeSpan.FromSeconds(1.5)))
+                return;
+
+            Process.GetCurrentProcess().Kill(entireProcessTree: true);
+        });
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        try
+        {
+            if (_characterManager != null)
+            {
+                _characterManager.SaveAllState();
+                _characterManager.Close();
+            }
+
+            _trayIcon?.Dispose();
+            _emergencyExitHotkey?.Dispose();
+            if (_singleInstanceMutex != null)
+            {
+                try
+                {
+                    _singleInstanceMutex.ReleaseMutex();
+                }
+                catch (ApplicationException)
+                {
+                    // The mutex was not owned during a partial startup.
+                }
+
+                _singleInstanceMutex.Dispose();
+                _singleInstanceMutex = null;
+            }
+            base.OnExit(e);
+        }
+        finally
+        {
+            _shutdownCompleted.Set();
+        }
     }
 }

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
+using SpinePet.Models;
 using SpinePet.Services;
 using SpinePet.ViewModels;
 
@@ -17,6 +18,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private readonly CharacterManager _characterManager;
     private readonly CharacterResourceDiscoveryService _resourceDiscovery;
+    private readonly UnityBundleImportService _bundleImporter;
+    private Dictionary<string, Dictionary<string, CharacterResourceFiles>>
+        _knownResources = new(StringComparer.OrdinalIgnoreCase);
     private OverlayWindow? _overlayWindow;
     private bool _isRefreshingSelection;
     private bool _isConfigMode = true;
@@ -28,16 +32,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private double _selectedSpeed = 100;
     private bool _allowRenderDrag;
 
+    public static RoutedUICommand SwitchResourceCommand { get; } =
+        new(
+            "Switch character resources",
+            nameof(SwitchResourceCommand),
+            typeof(MainWindow));
+
     public MainWindow(
         CharacterManager characterManager,
-        CharacterResourceDiscoveryService resourceDiscovery)
+        CharacterResourceDiscoveryService resourceDiscovery,
+        UnityBundleImportService bundleImporter)
     {
         InitializeComponent();
         _characterManager = characterManager;
         _resourceDiscovery = resourceDiscovery;
+        _bundleImporter = bundleImporter;
         _allowRenderDrag = characterManager.AllowRenderDrag;
+        CommandBindings.Add(new CommandBinding(
+            SwitchResourceCommand,
+            OnCharacterResourceTypeExecuted));
         DataContext = this;
 
+        RefreshKnownResources();
         RefreshCharacterList();
         _characterManager.CharactersChanged += RefreshCharacterList;
         _characterManager.CharacterScaleChanged += OnCharacterScaleChanged;
