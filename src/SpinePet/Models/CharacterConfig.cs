@@ -15,8 +15,14 @@ public sealed class CharacterConfig
     [JsonPropertyName("ExtraTexturePaths")]
     public List<string> AdditionalTexturePaths { get; set; } = new();
 
-    public string ResourceType { get; set; } =
-        CharacterResourceTypes.Standing;
+    // Read old state-based configurations once, then omit this retired key
+    // from every newly saved configuration.
+    [JsonPropertyName("ResourceType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyResourceType { get; set; }
+
+    [JsonIgnore]
+    public bool RequiresStandingMigration { get; set; }
 
     public double PositionX { get; set; } = 200;
     public double PositionY { get; set; } = 200;

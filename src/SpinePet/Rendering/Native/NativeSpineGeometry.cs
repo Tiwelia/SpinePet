@@ -25,22 +25,116 @@ internal readonly struct NativeSpineVertex
     public readonly Vector4 DarkColor;
 }
 
-internal sealed record NativeSpineDrawBatch(
-    NativeTextureSource Texture,
-    BlendMode BlendMode,
-    NativeSpineVertex[] Vertices,
-    int[] Indices);
+internal sealed class NativeSpineDrawBatch
+{
+    private NativeSpineVertex[] _vertices = [];
+    private int[] _indices = [];
+
+    public NativeTextureSource Texture { get; private set; } = null!;
+    public BlendMode BlendMode { get; private set; }
+    public NativeSpineVertex[] Vertices => _vertices;
+    public int[] Indices => _indices;
+    public int VertexCount { get; private set; }
+    public int IndexCount { get; private set; }
+
+    public bool Matches(
+        NativeTextureSource texture,
+        BlendMode blendMode) =>
+        ReferenceEquals(Texture, texture) && BlendMode == blendMode;
+
+    public void Reset(
+        NativeTextureSource texture,
+        BlendMode blendMode)
+    {
+        Texture = texture;
+        BlendMode = blendMode;
+        VertexCount = 0;
+        IndexCount = 0;
+    }
+
+    public int AppendVertices(
+        float[] positions,
+        float[] uvs,
+        int positionsLength,
+        Vector4 light,
+        Vector4 dark)
+    {
+        int sourceVertexCount = positionsLength / 2;
+        int vertexOffset = VertexCount;
+        EnsureVertexCapacity(vertexOffset + sourceVertexCount);
+        for (int index = 0; index < sourceVertexCount; index++)
+        {
+            int source = index * 2;
+            _vertices[vertexOffset + index] = new NativeSpineVertex(
+                new Vector2(positions[source], positions[source + 1]),
+                new Vector2(uvs[source], uvs[source + 1]),
+                light,
+                dark);
+        }
+
+        VertexCount += sourceVertexCount;
+        return vertexOffset;
+    }
+
+    public void AppendIndices(
+        int[] indices,
+        int indexCount,
+        int vertexOffset)
+    {
+        EnsureIndexCapacity(IndexCount + indexCount);
+        for (int index = 0; index < indexCount; index++)
+        {
+            _indices[IndexCount + index] = indices[index] + vertexOffset;
+        }
+
+        IndexCount += indexCount;
+    }
+
+    private void EnsureVertexCapacity(int requiredCapacity)
+    {
+        if (_vertices.Length >= requiredCapacity)
+        {
+            return;
+        }
+
+        Array.Resize(
+            ref _vertices,
+            GetExpandedCapacity(_vertices.Length, requiredCapacity));
+    }
+
+    private void EnsureIndexCapacity(int requiredCapacity)
+    {
+        if (_indices.Length >= requiredCapacity)
+        {
+            return;
+        }
+
+        Array.Resize(
+            ref _indices,
+            GetExpandedCapacity(_indices.Length, requiredCapacity));
+    }
+
+    private static int GetExpandedCapacity(
+        int currentCapacity,
+        int requiredCapacity)
+    {
+        long doubled = Math.Max(16L, (long)currentCapacity * 2);
+        return checked((int)Math.Max(requiredCapacity, doubled));
+    }
+}
 
 internal sealed class NativeSpineGeometry
 {
     private static readonly int[] QuadTriangles = [0, 1, 2, 2, 3, 0];
 
     private readonly SkeletonClipping _clipper = new();
+    private readonly List<NativeSpineDrawBatch> _activeBatches = [];
+    private readonly List<NativeSpineDrawBatch> _batchPool = [];
     private float[] _worldVertices = new float[8];
 
     public IReadOnlyList<NativeSpineDrawBatch> Build(Skeleton skeleton)
     {
-        List<NativeSpineDrawBatch> batches = [];
+        _activeBatches.Clear();
         Slot[] slots = skeleton.DrawOrder.Items;
 
         for (int slotIndex = 0; slotIndex < skeleton.DrawOrder.Count; slotIndex++)
@@ -120,8 +214,6 @@ internal sealed class NativeSpineGeometry
                 verticesLength = _clipper.ClippedVertices.Count;
             }
 
-            NativeSpineVertex[] outputVertices =
-                new NativeSpineVertex[verticesLength / 2];
             Vector4 light = new(
                 skeleton.R * slot.R * attachmentR,
                 skeleton.G * slot.G * attachmentG,
@@ -131,32 +223,30 @@ internal sealed class NativeSpineGeometry
                 ? new Vector4(slot.R2, slot.G2, slot.B2, 1)
                 : Vector4.Zero;
 
-            for (int index = 0; index < outputVertices.Length; index++)
-            {
-                int source = index * 2;
-                outputVertices[index] = new NativeSpineVertex(
-                    new Vector2(vertices[source], vertices[source + 1]),
-                    new Vector2(uvs[source], uvs[source + 1]),
-                    light,
-                    dark);
-            }
-
             int indexCount = _clipper.IsClipping
                 ? _clipper.ClippedTriangles.Count
                 : triangles.Length;
-            int[] outputIndices = new int[indexCount];
-            Array.Copy(triangles, outputIndices, indexCount);
-            batches.Add(
-                new NativeSpineDrawBatch(
-                    texture,
-                    slot.Data.BlendMode,
-                    outputVertices,
-                    outputIndices));
+            if (verticesLength == 0 || indexCount == 0)
+            {
+                _clipper.ClipEnd(slot);
+                continue;
+            }
+
+            NativeSpineDrawBatch batch = GetOrCreateBatch(
+                texture,
+                slot.Data.BlendMode);
+            int vertexOffset = batch.AppendVertices(
+                vertices,
+                uvs,
+                verticesLength,
+                light,
+                dark);
+            batch.AppendIndices(triangles, indexCount, vertexOffset);
             _clipper.ClipEnd(slot);
         }
 
         _clipper.ClipEnd();
-        return MergeAdjacentBatches(batches);
+        return _activeBatches;
     }
 
     private void EnsureWorldVertices(int length)
@@ -165,70 +255,28 @@ internal sealed class NativeSpineGeometry
             _worldVertices = new float[length];
     }
 
-    private static List<NativeSpineDrawBatch> MergeAdjacentBatches(
-        List<NativeSpineDrawBatch> source)
+    private NativeSpineDrawBatch GetOrCreateBatch(
+        NativeTextureSource texture,
+        BlendMode blendMode)
     {
-        if (source.Count < 2)
-            return source;
-
-        List<NativeSpineDrawBatch> merged = [];
-        int index = 0;
-        while (index < source.Count)
+        if (_activeBatches.Count > 0)
         {
-            NativeSpineDrawBatch first = source[index];
-            int end = index + 1;
-            int vertexCount = first.Vertices.Length;
-            int indexCount = first.Indices.Length;
-            while (end < source.Count &&
-                   ReferenceEquals(source[end].Texture, first.Texture) &&
-                   source[end].BlendMode == first.BlendMode)
+            NativeSpineDrawBatch current = _activeBatches[^1];
+            if (current.Matches(texture, blendMode))
             {
-                vertexCount += source[end].Vertices.Length;
-                indexCount += source[end].Indices.Length;
-                end++;
+                return current;
             }
-
-            if (end == index + 1)
-            {
-                merged.Add(first);
-                index = end;
-                continue;
-            }
-
-            NativeSpineVertex[] vertices = new NativeSpineVertex[vertexCount];
-            int[] indices = new int[indexCount];
-            int vertexOffset = 0;
-            int indexOffset = 0;
-            for (int part = index; part < end; part++)
-            {
-                NativeSpineDrawBatch batch = source[part];
-                Array.Copy(
-                    batch.Vertices,
-                    0,
-                    vertices,
-                    vertexOffset,
-                    batch.Vertices.Length);
-                for (int triangleIndex = 0;
-                     triangleIndex < batch.Indices.Length;
-                     triangleIndex++)
-                {
-                    indices[indexOffset + triangleIndex] =
-                        batch.Indices[triangleIndex] + vertexOffset;
-                }
-
-                vertexOffset += batch.Vertices.Length;
-                indexOffset += batch.Indices.Length;
-            }
-
-            merged.Add(
-                new NativeSpineDrawBatch(
-                    first.Texture,
-                    first.BlendMode,
-                    vertices,
-                    indices));
-            index = end;
         }
 
-        return merged;
+        int batchIndex = _activeBatches.Count;
+        if (batchIndex == _batchPool.Count)
+        {
+            _batchPool.Add(new NativeSpineDrawBatch());
+        }
+
+        NativeSpineDrawBatch batch = _batchPool[batchIndex];
+        batch.Reset(texture, blendMode);
+        _activeBatches.Add(batch);
+        return batch;
     }
 }

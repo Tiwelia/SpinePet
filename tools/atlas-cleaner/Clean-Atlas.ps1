@@ -17,6 +17,7 @@ if (-not (Test-Path -LiteralPath $Folder -PathType Container)) {
 function Test-IsAtlasEntryHeader {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Line
     )
 
@@ -34,6 +35,7 @@ function Test-IsAtlasEntryHeader {
 function Test-IsRegionHeader {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Line
     )
 

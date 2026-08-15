@@ -1,5 +1,6 @@
 using System.IO;
 using Spine;
+using SpinePet.Infrastructure.Import;
 using SpinePet.Models;
 
 namespace SpinePet.Rendering.Native;
@@ -44,6 +45,8 @@ internal sealed class NativeSpineResource : IDisposable
         if (!File.Exists(config.SkeletonPath))
             throw new FileNotFoundException("Spine skeleton not found.", config.SkeletonPath);
 
+        SpineSkeletonCompatibility.EnsureSupported(config.SkeletonPath);
+
         Bone.yDown = true;
         NativeAtlasTextureLoader textureLoader = new();
         Atlas? atlas = null;
@@ -51,13 +54,6 @@ internal sealed class NativeSpineResource : IDisposable
         {
             atlas = new Atlas(config.AtlasPath, textureLoader);
             SkeletonData data = LoadSkeletonData(config.SkeletonPath, atlas);
-            if (!string.IsNullOrWhiteSpace(data.Version) &&
-                !data.Version.StartsWith("4.1", StringComparison.Ordinal))
-            {
-                throw new InvalidDataException(
-                    $"Skeleton version {data.Version} is not compatible with Spine runtime 4.1.");
-            }
-
             return new NativeSpineResource(atlas, textureLoader, data);
         }
         catch

@@ -1,18 +1,24 @@
 using System.Drawing;
-using System.Runtime.InteropServices;
+using System.IO;
 using System.Windows.Forms;
-using SpinePet.Infrastructure;
+using System.Windows.Resources;
+using Application = System.Windows.Application;
 
 namespace SpinePet.Services;
 
 public sealed class TrayIconService : IDisposable
 {
+    private static readonly Uri TrayIconUri = new(
+        "pack://application:,,,/Assets/Brand/SpinePet.ico",
+        UriKind.Absolute);
+
     private readonly Action _openPanel;
     private readonly Action _showAll;
     private readonly Action _hideAll;
     private readonly Action _exit;
     private NotifyIcon? _notifyIcon;
     private ContextMenuStrip? _contextMenu;
+    private Icon? _trayIconImage;
 
     public TrayIconService(
         Action openPanel,
@@ -33,22 +39,38 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
-        _contextMenu = new ContextMenuStrip();
-        _contextMenu.Items.Add("Open Panel", null, (_, _) => _openPanel());
-        _contextMenu.Items.Add(new ToolStripSeparator());
-        _contextMenu.Items.Add("Show All", null, (_, _) => _showAll());
-        _contextMenu.Items.Add("Hide All", null, (_, _) => _hideAll());
-        _contextMenu.Items.Add(new ToolStripSeparator());
-        _contextMenu.Items.Add("Exit", null, (_, _) => _exit());
-
-        _notifyIcon = new NotifyIcon
+        ContextMenuStrip contextMenu = new();
+        Icon trayIconImage = LoadTrayIcon();
+        NotifyIcon notifyIcon = new()
         {
-            Text = "SpinePet — Render Mode",
-            Icon = CreateIcon(),
-            ContextMenuStrip = _contextMenu,
-            Visible = true
+            Text = "SpinePet - Render Mode",
+            Icon = trayIconImage,
+            ContextMenuStrip = contextMenu
         };
-        _notifyIcon.DoubleClick += (_, _) => _openPanel();
+
+        try
+        {
+            contextMenu.Items.Add("Open Panel", null, (_, _) => _openPanel());
+            contextMenu.Items.Add(new ToolStripSeparator());
+            contextMenu.Items.Add("Show All", null, (_, _) => _showAll());
+            contextMenu.Items.Add("Hide All", null, (_, _) => _hideAll());
+            contextMenu.Items.Add(new ToolStripSeparator());
+            contextMenu.Items.Add("Exit", null, (_, _) => _exit());
+
+            notifyIcon.DoubleClick += (_, _) => _openPanel();
+            notifyIcon.Visible = true;
+
+            _contextMenu = contextMenu;
+            _trayIconImage = trayIconImage;
+            _notifyIcon = notifyIcon;
+        }
+        catch
+        {
+            notifyIcon.Dispose();
+            trayIconImage.Dispose();
+            contextMenu.Dispose();
+            throw;
+        }
     }
 
     public void Dispose()
@@ -58,46 +80,34 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
-        _notifyIcon.Visible = false;
-        _notifyIcon.Icon?.Dispose();
-        _notifyIcon.Dispose();
-        _notifyIcon = null;
-        _contextMenu?.Dispose();
-        _contextMenu = null;
-        GC.SuppressFinalize(this);
-    }
-
-    private static Icon CreateIcon()
-    {
-        using Bitmap bitmap = new(32, 32);
-        using Graphics graphics = Graphics.FromImage(bitmap);
-        graphics.Clear(Color.Transparent);
-        using SolidBrush backgroundBrush =
-            new(Color.FromArgb(255, 137, 180, 250));
-        graphics.FillEllipse(backgroundBrush, 1, 1, 30, 30);
-        using Font font = new("Segoe UI", 14, FontStyle.Bold);
-        using SolidBrush textBrush =
-            new(Color.FromArgb(255, 30, 30, 46));
-        graphics.DrawString("S", font, textBrush, 6, 3);
-
-        IntPtr iconHandle = bitmap.GetHicon();
         try
         {
-            using Icon temporaryIcon = Icon.FromHandle(iconHandle);
-            return (Icon)temporaryIcon.Clone();
+            _notifyIcon.Visible = false;
+            _notifyIcon.Dispose();
         }
         finally
         {
-            if (!DestroyIcon(iconHandle))
-            {
-                AppLogger.Write(
-                    nameof(TrayIconService),
-                    $"destroy-icon-failed error={Marshal.GetLastPInvokeError()}");
-            }
+            _notifyIcon = null;
+            _trayIconImage?.Dispose();
+            _trayIconImage = null;
+            _contextMenu?.Dispose();
+            _contextMenu = null;
         }
+
+        GC.SuppressFinalize(this);
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DestroyIcon(IntPtr iconHandle);
+    private static Icon LoadTrayIcon()
+    {
+        StreamResourceInfo? resource = Application.GetResourceStream(TrayIconUri);
+        if (resource == null)
+        {
+            throw new InvalidOperationException(
+                $"Tray icon resource was not found: {TrayIconUri}");
+        }
+
+        using Stream stream = resource.Stream;
+        using Icon sourceIcon = new(stream, SystemInformation.SmallIconSize);
+        return (Icon)sourceIcon.Clone();
+    }
 }

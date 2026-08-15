@@ -1,8 +1,10 @@
 <Window x:Class="SpinePet.Views.MainWindow"
+        x:Name="RootWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:SpinePet.Views"
         Title="SpinePet"
+        Icon="pack://application:,,,/Assets/Brand/SpinePet.ico"
         Width="468"
         MinWidth="468"
         WindowStyle="None"
@@ -15,7 +17,14 @@
         ResizeMode="NoResize"
         Topmost="True"
         ShowInTaskbar="False"
-        Loaded="OnWindowLoaded">
+        Loaded="OnWindowLoaded"
+        AutomationProperties.Name="SpinePet configuration panel">
+    <Window.InputBindings>
+        <KeyBinding Key="F"
+                    Modifiers="Control"
+                    Command="{x:Static views:MainWindow.FocusCharacterSearchCommand}" />
+    </Window.InputBindings>
+
     <Window.Resources>
         <!-- Color system -->
         <SolidColorBrush x:Key="PanelBrush" Color="#FF11151E" />
@@ -484,6 +493,80 @@
             </Setter>
         </Style>
 
+        <!-- Slim, always discoverable scrolling for the narrow docked panel. -->
+        <Style x:Key="SlimScrollBarButtonStyle"
+               TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Background="Transparent" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SlimScrollBarThumbStyle"
+               TargetType="Thumb">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border x:Name="ThumbChrome"
+                                Margin="1"
+                                Background="#FF56647E"
+                                CornerRadius="999" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbChrome"
+                                        Property="Background"
+                                        Value="{StaticResource AccentHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbChrome"
+                                        Property="Background"
+                                        Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SlimScrollBarStyle"
+               TargetType="ScrollBar">
+            <Setter Property="Width" Value="8" />
+            <Setter Property="MinWidth" Value="8" />
+            <Setter Property="Background" Value="#32101720" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Border Width="{TemplateBinding Width}"
+                                Margin="2,0,0,0"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="999">
+                            <Track x:Name="PART_Track"
+                                   Orientation="{TemplateBinding Orientation}"
+                                   IsDirectionReversed="True"
+                                   Focusable="False">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}"
+                                                  Style="{StaticResource SlimScrollBarButtonStyle}" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb MinHeight="28"
+                                           Style="{StaticResource SlimScrollBarThumbStyle}" />
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}"
+                                                  Style="{StaticResource SlimScrollBarButtonStyle}" />
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Panels and cards -->
         <Style x:Key="SectionBorderStyle" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource SectionBrush}" />
@@ -504,48 +587,33 @@
 
         <Style x:Key="CharacterCardItemStyle" TargetType="ListBoxItem">
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Margin" Value="0,0,8,8" />
+            <Setter Property="Margin" Value="0,0,0,8" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Focusable" Value="True" />
+            <Setter Property="AutomationProperties.Name"
+                    Value="{Binding AccessibilitySummary}" />
+            <Setter Property="AutomationProperties.HelpText"
+                    Value="Use arrow keys to select. Press Enter or Space to show or hide. Press Shift+F10 to switch skin." />
             <Setter Property="ToolTip"
-                    Value="Right-click or press Shift+F10 to switch character state" />
+                    Value="Enter or Space: show/hide · Shift+F10: switch skin" />
             <Setter Property="ContextMenu">
                 <Setter.Value>
                     <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
+                                 ItemsSource="{Binding AvailableSkins}"
                                  IsEnabled="{Binding CanToggleVisibility}"
-                                 AutomationProperties.Name="Character state">
-                        <MenuItem Header="Character state"
-                                  IsEnabled="False"
-                                  FontWeight="SemiBold" />
-                        <Separator />
-                        <MenuItem Header="_Standing"
-                                  Tag="standing"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsStandingResources, Mode=OneWay}"
-                                  IsEnabled="{Binding HasStandingResources}"
-                                  Command="{x:Static views:MainWindow.SwitchResourceCommand}"
-                                  CommandParameter="standing"
-                                  CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                  AutomationProperties.Name="Use standing resources" />
-                        <MenuItem Header="_Aim"
-                                  Tag="aim"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsAimResources, Mode=OneWay}"
-                                  IsEnabled="{Binding HasAimResources}"
-                                  Command="{x:Static views:MainWindow.SwitchResourceCommand}"
-                                  CommandParameter="aim"
-                                  CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                  AutomationProperties.Name="Use aim resources" />
-                        <MenuItem Header="_Cover"
-                                  Tag="cover"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsCoverResources, Mode=OneWay}"
-                                  IsEnabled="{Binding HasCoverResources}"
-                                  Command="{x:Static views:MainWindow.SwitchResourceCommand}"
-                                  CommandParameter="cover"
-                                  CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                  AutomationProperties.Name="Use cover resources" />
+                                 AutomationProperties.Name="Switch character skin">
+                        <ContextMenu.ItemContainerStyle>
+                            <Style TargetType="MenuItem">
+                                <Setter Property="Header" Value="{Binding Label}" />
+                                <Setter Property="IsCheckable" Value="True" />
+                                <Setter Property="IsChecked" Value="{Binding IsSelected, Mode=OneWay}" />
+                                <Setter Property="Command" Value="{x:Static views:MainWindow.SwitchSkinCommand}" />
+                                <Setter Property="CommandParameter" Value="{Binding}" />
+                                <Setter Property="CommandTarget" Value="{Binding Source={x:Reference RootWindow}}" />
+                                <Setter Property="AutomationProperties.Name" Value="{Binding Label}" />
+                            </Style>
+                        </ContextMenu.ItemContainerStyle>
                     </ContextMenu>
                 </Setter.Value>
             </Setter>
@@ -560,14 +628,28 @@
                                     Opacity="0" />
                             <Border x:Name="ItemBorder"
                                     Margin="1"
-                                    Background="#FF202735"
+                                    Background="#C9202735"
                                     BorderBrush="#FF354055"
                                     BorderThickness="1"
-                                    CornerRadius="11"
-                                    Padding="6"
+                                    CornerRadius="12"
+                                    Padding="10"
                                     SnapsToDevicePixels="True">
                                 <ContentPresenter />
                             </Border>
+                            <Border x:Name="SelectedRail"
+                                    Width="3"
+                                    Margin="1,13,0,13"
+                                    HorizontalAlignment="Left"
+                                    Background="{StaticResource AccentHoverBrush}"
+                                    CornerRadius="999"
+                                    Opacity="0" />
+                            <Border x:Name="FocusChrome"
+                                    Margin="1"
+                                    BorderBrush="{StaticResource FocusRingBrush}"
+                                    BorderThickness="2"
+                                    CornerRadius="12"
+                                    IsHitTestVisible="False"
+                                    Opacity="0" />
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -576,12 +658,12 @@
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="SelectedGlow" Property="Opacity" Value="1" />
+                                <Setter TargetName="SelectedRail" Property="Opacity" Value="1" />
                                 <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{StaticResource AccentHoverBrush}" />
-                                <Setter TargetName="ItemBorder" Property="BorderThickness" Value="2" />
                                 <Setter TargetName="ItemBorder" Property="Background" Value="#FF252B3C" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{StaticResource FocusRingBrush}" />
+                                <Setter TargetName="FocusChrome" Property="Opacity" Value="1" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -629,30 +711,12 @@
                                 Height="42"
                                 Margin="0,0,12,0"
                                 CornerRadius="12"
-                                Background="{StaticResource AccentGradientBrush}"
-                                BorderBrush="#55FFFFFF"
-                                BorderThickness="1">
-                            <Viewbox Width="23"
-                                     Height="23">
-                                <Canvas Width="24" Height="24">
-                                    <Path Fill="White"
-                                          Data="M12,2.25 C7.4,2.25 4.25,5.65 4.25,10.25 C4.25,15.7 7.9,20.2 12,21.75 C16.1,20.2 19.75,15.7 19.75,10.25 C19.75,5.65 16.6,2.25 12,2.25 Z" />
-                                    <Ellipse Canvas.Left="7.25"
-                                             Canvas.Top="8"
-                                             Width="3"
-                                             Height="3"
-                                             Fill="#FF7366DF" />
-                                    <Ellipse Canvas.Left="13.75"
-                                             Canvas.Top="8"
-                                             Width="3"
-                                             Height="3"
-                                             Fill="#FF7366DF" />
-                                    <Path Stroke="#FF7366DF"
-                                          StrokeThickness="1.7"
-                                          StrokeStartLineCap="Round"
-                                          Data="M9,14 C10.6,15.3 13.4,15.3 15,14" />
-                                </Canvas>
-                            </Viewbox>
+                                ClipToBounds="True">
+                            <Image Source="pack://application:,,,/Assets/Brand/spinepet-avatar.png"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="HighQuality"
+                                   IsHitTestVisible="False"
+                                   AutomationProperties.Name="SpinePet white ghost avatar" />
                         </Border>
 
                         <StackPanel Grid.Column="1"
@@ -688,10 +752,13 @@
                                          Margin="0,0,6,0"
                                          VerticalAlignment="Center"
                                          Fill="{StaticResource InfoBrush}" />
-                                <TextBlock Text="{Binding Characters.Count, StringFormat={}{0} loaded}"
+                                <TextBlock x:Name="CharacterCountText"
+                                           Text="{Binding CharacterCountDisplay}"
                                            FontSize="11"
                                            FontWeight="SemiBold"
-                                           Foreground="#FFBCEFFF" />
+                                           Foreground="#FFBCEFFF"
+                                           AutomationProperties.Name="{Binding CharacterSearchStatus}"
+                                           AutomationProperties.LiveSetting="Polite" />
                             </StackPanel>
                         </Border>
                     </Grid>
@@ -699,10 +766,14 @@
 
                 <ScrollViewer x:Name="MainScrollViewer"
                               Grid.Row="1"
-                              VerticalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
                               CanContentScroll="False"
                               Focusable="False">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar"
+                               BasedOn="{StaticResource SlimScrollBarStyle}" />
+                    </ScrollViewer.Resources>
                     <StackPanel>
                         <!-- Character library -->
                         <Border Style="{StaticResource SectionBorderStyle}">
@@ -711,6 +782,7 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
@@ -781,158 +853,286 @@
                                             <TextBlock Text="Scan" />
                                         </StackPanel>
                                     </Button>
+
+                                    <Button Grid.Column="4"
+                                            Style="{StaticResource QuietButtonStyle}"
+                                            MinWidth="72"
+                                            Height="34"
+                                            MinHeight="34"
+                                            Margin="8,0,0,0"
+                                            Padding="10,0"
+                                            Click="OnOpenResourceFolder"
+                                            ToolTip="Open the resource folder"
+                                            AutomationProperties.Name="Open resource folder">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path Width="13"
+                                                  Height="11"
+                                                  Margin="0,0,7,0"
+                                                  Stretch="Uniform"
+                                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                  StrokeThickness="1.6"
+                                                  StrokeLineJoin="Round"
+                                                  Data="M1,3 L1,11 L13,11 L13,4 L7,4 L6,2 L1,2 Z" />
+                                            <TextBlock Text="Folder" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Text="Search"
+                                               Margin="2,0,12,0"
+                                               VerticalAlignment="Center"
+                                               Style="{StaticResource FieldLabelStyle}" />
+
+                                    <Border Grid.Column="1"
+                                            Height="40">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background"
+                                                        Value="{StaticResource ControlBrush}" />
+                                                <Setter Property="BorderBrush"
+                                                        Value="{StaticResource BorderBrushStrong}" />
+                                                <Setter Property="BorderThickness"
+                                                        Value="1" />
+                                                <Setter Property="CornerRadius"
+                                                        Value="9" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsMouseOver"
+                                                             Value="True">
+                                                        <Setter Property="BorderBrush"
+                                                                Value="#FF5A6882" />
+                                                    </Trigger>
+                                                    <Trigger Property="IsKeyboardFocusWithin"
+                                                             Value="True">
+                                                        <Setter Property="BorderBrush"
+                                                                Value="{StaticResource FocusRingBrush}" />
+                                                        <Setter Property="BorderThickness"
+                                                                Value="2" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+
+                                        <Grid>
+                                            <TextBox x:Name="CharacterSearchBox"
+                                                     Text="{Binding CharacterSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                     Padding="12,0,62,0"
+                                                     VerticalContentAlignment="Center"
+                                                     Background="Transparent"
+                                                     BorderThickness="0"
+                                                     CaretBrush="{StaticResource TextPrimaryBrush}"
+                                                     Foreground="{StaticResource TextPrimaryBrush}"
+                                                     FontSize="13"
+                                                     SelectionBrush="{StaticResource AccentBrush}"
+                                                     SpellCheck.IsEnabled="False"
+                                                     ToolTip="Search characters (Ctrl+F). Down or Enter opens results; Esc clears."
+                                                     AutomationProperties.Name="Search characters"
+                                                     AutomationProperties.HelpText="Filters by character name or skin as you type. Press Down or Enter to move to results. Press Escape to clear.">
+                                                <TextBox.InputBindings>
+                                                    <KeyBinding Key="Escape"
+                                                                Command="{x:Static views:MainWindow.ClearCharacterSearchCommand}" />
+                                                    <KeyBinding Key="Down"
+                                                                Command="{x:Static views:MainWindow.FocusCharacterResultsCommand}" />
+                                                    <KeyBinding Key="Enter"
+                                                                Command="{x:Static views:MainWindow.FocusCharacterResultsCommand}" />
+                                                </TextBox.InputBindings>
+                                            </TextBox>
+
+                                            <TextBlock Text="Name or skin"
+                                                       Margin="13,0,62,0"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{StaticResource MutedBrush}"
+                                                       FontSize="12"
+                                                       IsHitTestVisible="False">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility"
+                                                                Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding ElementName=CharacterSearchBox, Path=Text.Length}"
+                                                                         Value="0">
+                                                                <Setter Property="Visibility"
+                                                                        Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+
+                                            <Button Width="50"
+                                                    Height="28"
+                                                    MinHeight="28"
+                                                    Margin="0,0,6,0"
+                                                    Padding="7,0"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    Command="{x:Static views:MainWindow.ClearCharacterSearchCommand}"
+                                                    AutomationProperties.Name="Clear character search">
+                                                <Button.Style>
+                                                    <Style TargetType="Button"
+                                                           BasedOn="{StaticResource QuietButtonStyle}">
+                                                        <Setter Property="Visibility"
+                                                                Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasCharacterSearchInput}"
+                                                                         Value="True">
+                                                                <Setter Property="Visibility"
+                                                                        Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                                <TextBlock Text="Clear"
+                                                           FontSize="11" />
+                                            </Button>
+                                        </Grid>
+                                    </Border>
                                 </Grid>
 
                                 <Grid>
                                     <ListBox x:Name="CharacterCards"
-                                             ItemsSource="{Binding Characters}"
+                                             ItemsSource="{Binding CharacterView}"
                                              SelectedItem="{Binding SelectedCharacter, Mode=TwoWay}"
                                              SelectionChanged="OnCharacterSelectionChanged"
                                              PreviewMouseWheel="OnCharacterCardsPreviewMouseWheel"
+                                             PreviewKeyDown="OnCharacterCardsPreviewKeyDown"
                                              Background="Transparent"
                                              BorderThickness="0"
                                              ItemContainerStyle="{StaticResource CharacterCardItemStyle}"
                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                             ScrollViewer.VerticalScrollBarVisibility="Hidden"
-                                             ScrollViewer.CanContentScroll="False"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             ScrollViewer.CanContentScroll="True"
+                                             ScrollViewer.IsDeferredScrollingEnabled="False"
+                                             ScrollViewer.PanningMode="VerticalOnly"
+                                             VirtualizingPanel.IsVirtualizing="True"
+                                             VirtualizingPanel.VirtualizationMode="Recycling"
+                                             VirtualizingPanel.ScrollUnit="Pixel"
+                                             VirtualizingPanel.CacheLength="1"
+                                             VirtualizingPanel.CacheLengthUnit="Page"
+                                             KeyboardNavigation.TabNavigation="Once"
                                              KeyboardNavigation.DirectionalNavigation="Contained"
                                              AutomationProperties.Name="Character library"
-                                             MinHeight="100"
-                                             MaxHeight="552">
+                                             MinHeight="216"
+                                             MaxHeight="424">
+                                        <ListBox.InputBindings>
+                                            <KeyBinding Key="Escape"
+                                                        Command="{x:Static views:MainWindow.ClearCharacterSearchCommand}" />
+                                        </ListBox.InputBindings>
+                                        <ListBox.Resources>
+                                            <Style TargetType="ScrollBar"
+                                                   BasedOn="{StaticResource SlimScrollBarStyle}" />
+                                        </ListBox.Resources>
                                         <ListBox.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <UniformGrid Columns="3" />
+                                                <VirtualizingStackPanel />
                                             </ItemsPanelTemplate>
                                         </ListBox.ItemsPanel>
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
-                                                <!-- Keep these metrics unchanged: the source character art is 1:2. -->
-                                                <Grid Height="252"
+                                                <Grid MinHeight="96"
                                                       Tag="{Binding}">
-                                                    <Grid.RowDefinitions>
-                                                        <RowDefinition Height="192" />
-                                                        <RowDefinition Height="Auto" />
-                                                        <RowDefinition Height="Auto" />
-                                                    </Grid.RowDefinitions>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="58" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
 
-                                                    <Border Grid.Row="0"
-                                                            CornerRadius="8"
-                                                            BorderBrush="#FF364158"
+                                                    <Border Grid.Column="0"
+                                                            Width="54"
+                                                            Height="88"
+                                                            HorizontalAlignment="Left"
+                                                            VerticalAlignment="Center"
+                                                            CornerRadius="9"
+                                                            BorderBrush="#FF3A465D"
                                                             BorderThickness="1"
                                                             ClipToBounds="True">
                                                         <Border.Background>
                                                             <RadialGradientBrush Center="0.5,0.32"
                                                                                  GradientOrigin="0.5,0.32"
-                                                                                 RadiusX="0.8"
-                                                                                 RadiusY="0.8">
+                                                                                 RadiusX="0.9"
+                                                                                 RadiusY="0.9">
                                                                 <GradientStop Offset="0" Color="#FF30354C" />
-                                                                <GradientStop Offset="0.58" Color="#FF202737" />
+                                                                <GradientStop Offset="0.62" Color="#FF202737" />
                                                                 <GradientStop Offset="1" Color="#FF171C27" />
                                                             </RadialGradientBrush>
                                                         </Border.Background>
-                                                        <Grid>
-                                                            <Ellipse Width="100"
-                                                                     Height="100"
-                                                                     HorizontalAlignment="Center"
-                                                                     VerticalAlignment="Center"
-                                                                     Fill="#128B7CF6"
-                                                                     IsHitTestVisible="False" />
-                                                            <Image Source="{Binding ThumbnailPath}"
-                                                                   Margin="5"
-                                                                   Stretch="Uniform"
-                                                                   AutomationProperties.Name="{Binding Name}"
-                                                                   RenderOptions.BitmapScalingMode="HighQuality" />
-                                                            <Border Height="46"
-                                                                    VerticalAlignment="Bottom"
-                                                                    IsHitTestVisible="False">
-                                                                <Border.Background>
-                                                                    <LinearGradientBrush StartPoint="0,0"
-                                                                                         EndPoint="0,1">
-                                                                        <GradientStop Offset="0" Color="#00121822" />
-                                                                        <GradientStop Offset="1" Color="#B8121822" />
-                                                                    </LinearGradientBrush>
-                                                                </Border.Background>
-                                                            </Border>
-
-                                                            <Border x:Name="StateBadge"
-                                                                    HorizontalAlignment="Right"
-                                                                    VerticalAlignment="Top"
-                                                                    Margin="7"
-                                                                    CornerRadius="999"
-                                                                    Padding="7,4"
-                                                                    Background="#D9151B26"
-                                                                    BorderBrush="#4D7F8BA3"
-                                                                    BorderThickness="1">
-                                                                <StackPanel Orientation="Horizontal">
-                                                                    <Ellipse x:Name="StateDot"
-                                                                             Width="6"
-                                                                             Height="6"
-                                                                             Margin="0,0,5,0"
-                                                                             VerticalAlignment="Center"
-                                                                             Fill="{StaticResource SubtleBrush}" />
-                                                                    <TextBlock x:Name="CardStateText"
-                                                                               Text="Hidden"
-                                                                               FontSize="10"
-                                                                               FontWeight="SemiBold"
-                                                                               Foreground="{StaticResource MutedBrush}" />
-                                                                </StackPanel>
-                                                            </Border>
-
-                                                            <Border HorizontalAlignment="Left"
-                                                                    VerticalAlignment="Top"
-                                                                    Margin="7"
-                                                                    CornerRadius="999"
-                                                                    Padding="7,4"
-                                                                    Background="#D9221D38"
-                                                                    BorderBrush="#668B7CF6"
-                                                                    BorderThickness="1"
-                                                                    IsHitTestVisible="False">
-                                                                <TextBlock Text="{Binding SkinLabel}"
-                                                                           FontSize="10"
-                                                                           FontWeight="SemiBold"
-                                                                           Foreground="#FFDCD6FF" />
-                                                            </Border>
-                                                        </Grid>
+                                                        <Image Source="{Binding ThumbnailPath}"
+                                                               Margin="3"
+                                                               Stretch="Uniform"
+                                                               Focusable="False"
+                                                               RenderOptions.BitmapScalingMode="HighQuality" />
                                                     </Border>
 
-                                                    <Grid Grid.Row="1"
-                                                          Margin="2,8,2,7">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                        </Grid.ColumnDefinitions>
+                                                    <Grid Grid.Column="1"
+                                                          Margin="12,1,10,1"
+                                                          VerticalAlignment="Center">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                        </Grid.RowDefinitions>
+
                                                         <TextBlock Text="{Binding Name}"
-                                                                   FontSize="12"
+                                                                   FontSize="15"
                                                                    FontWeight="SemiBold"
+                                                                   LineHeight="18"
                                                                    Foreground="{StaticResource TextPrimaryBrush}"
-                                                                   TextTrimming="CharacterEllipsis"
+                                                                   TextWrapping="Wrap"
+                                                                   TextTrimming="None"
                                                                    ToolTip="{Binding Name}" />
-                                                        <Border Grid.Column="1"
-                                                                Margin="6,0,0,0"
-                                                                Padding="6,2"
-                                                                VerticalAlignment="Center"
-                                                                CornerRadius="999"
-                                                                Background="{StaticResource AccentSoftBrush}"
-                                                                BorderBrush="#668B7CF6"
-                                                                BorderThickness="1"
-                                                                IsHitTestVisible="False">
-                                                            <TextBlock Text="{Binding ResourceTypeLabel}"
-                                                                       FontSize="9"
+
+                                                        <StackPanel Grid.Row="1"
+                                                                    Margin="0,6,0,0"
+                                                                    Orientation="Horizontal">
+                                                             <Border Padding="7,3"
+                                                                     CornerRadius="999"
+                                                                      Background="#B6221D38"
+                                                                     BorderBrush="#668B7CF6"
+                                                                     BorderThickness="1">
+                                                                <TextBlock Text="{Binding SkinLabel}"
+                                                                           FontSize="11"
+                                                                           FontWeight="SemiBold"
+                                                                           Foreground="#FFDCD6FF"
+                                                                           MaxWidth="92"
+                                                                            TextTrimming="CharacterEllipsis"
+                                                                            ToolTip="{Binding SkinLabel}" />
+                                                             </Border>
+                                                         </StackPanel>
+
+                                                        <StackPanel Grid.Row="2"
+                                                                    Margin="1,7,0,0"
+                                                                    Orientation="Horizontal">
+                                                            <Ellipse x:Name="StateDot"
+                                                                     Width="7"
+                                                                     Height="7"
+                                                                     Margin="0,0,6,0"
+                                                                     VerticalAlignment="Center"
+                                                                     Fill="{StaticResource SubtleBrush}" />
+                                                            <TextBlock x:Name="CardStateText"
+                                                                       Text="Hidden on desktop"
+                                                                       FontSize="11"
                                                                        FontWeight="SemiBold"
-                                                                       Foreground="#FFDCD6FF" />
-                                                        </Border>
+                                                                       Foreground="{StaticResource MutedBrush}" />
+                                                        </StackPanel>
                                                     </Grid>
 
                                                     <Button x:Name="VisibilityButton"
-                                                            Grid.Row="2"
+                                                            Grid.Column="2"
                                                             Style="{StaticResource BaseButtonStyle}"
                                                             IsEnabled="{Binding CanToggleVisibility}"
-                                                            Height="30"
-                                                            MinHeight="30"
-                                                            Padding="9,0"
+                                                            Width="78"
+                                                            Height="36"
+                                                            MinHeight="36"
+                                                            Padding="10,0"
                                                             Click="OnToggleCharacter"
                                                             Tag="{Binding}"
-                                                            AutomationProperties.Name="Toggle character visibility">
+                                                            IsTabStop="False"
+                                                            AutomationProperties.Name="{Binding VisibilityActionAutomationLabel}">
                                                         <StackPanel Orientation="Horizontal">
                                                             <Path x:Name="VisibilityIcon"
                                                                   Width="13"
@@ -950,21 +1150,18 @@
                                                 </Grid>
                                                 <DataTemplate.Triggers>
                                                     <DataTrigger Binding="{Binding IsVisible}" Value="True">
-                                                        <Setter TargetName="StateBadge" Property="Background" Value="#D8182929" />
-                                                        <Setter TargetName="StateBadge" Property="BorderBrush" Value="#664ADEA2" />
                                                         <Setter TargetName="StateDot" Property="Fill" Value="{StaticResource SuccessBrush}" />
-                                                        <Setter TargetName="CardStateText" Property="Text" Value="Visible" />
+                                                        <Setter TargetName="CardStateText" Property="Text" Value="Visible on desktop" />
                                                         <Setter TargetName="CardStateText" Property="Foreground" Value="#FFB9F6DB" />
                                                         <Setter TargetName="VisibilityButton" Property="Background" Value="{StaticResource SuccessSoftBrush}" />
                                                         <Setter TargetName="VisibilityButton" Property="BorderBrush" Value="#704ADEA2" />
                                                         <Setter TargetName="VisibilityButton" Property="Foreground" Value="#FFC8F8E2" />
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding IsLoading}" Value="True">
-                                                        <Setter TargetName="StateBadge" Property="Background" Value="#D92B261B" />
-                                                        <Setter TargetName="StateBadge" Property="BorderBrush" Value="#66F6B85A" />
                                                         <Setter TargetName="StateDot" Property="Fill" Value="{StaticResource WarningBrush}" />
                                                         <Setter TargetName="CardStateText" Property="Text" Value="Loading" />
                                                         <Setter TargetName="CardStateText" Property="Foreground" Value="#FFFFE4B7" />
+                                                        <Setter TargetName="VisibilityIcon" Property="Visibility" Value="Collapsed" />
                                                     </DataTrigger>
                                                 </DataTemplate.Triggers>
                                             </DataTemplate>
@@ -978,10 +1175,15 @@
                                             <Style TargetType="StackPanel">
                                                 <Setter Property="Visibility" Value="Collapsed" />
                                                 <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding ElementName=CharacterCards, Path=HasItems}"
-                                                                 Value="False">
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding ElementName=CharacterCards, Path=HasItems}"
+                                                                       Value="False" />
+                                                            <Condition Binding="{Binding HasCharacters}"
+                                                                       Value="False" />
+                                                        </MultiDataTrigger.Conditions>
                                                         <Setter Property="Visibility" Value="Visible" />
-                                                    </DataTrigger>
+                                                    </MultiDataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </StackPanel.Style>
@@ -1001,6 +1203,49 @@
                                                    FontSize="12"
                                                    FontWeight="SemiBold"
                                                    Foreground="{StaticResource MutedBrush}" />
+                                    </StackPanel>
+
+                                    <StackPanel VerticalAlignment="Center"
+                                                HorizontalAlignment="Center"
+                                                AutomationProperties.Name="No matching characters. Try another name or skin."
+                                                AutomationProperties.LiveSetting="Polite">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="Visibility"
+                                                        Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding ElementName=CharacterCards, Path=HasItems}"
+                                                                       Value="False" />
+                                                            <Condition Binding="{Binding HasCharacters}"
+                                                                       Value="True" />
+                                                            <Condition Binding="{Binding HasCharacterSearch}"
+                                                                       Value="True" />
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Visibility"
+                                                                Value="Visible" />
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <TextBlock Text="No matching characters"
+                                                   HorizontalAlignment="Center"
+                                                   FontSize="13"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextPrimaryBrush}" />
+                                        <TextBlock Text="Try another name or skin."
+                                                   Margin="0,4,0,10"
+                                                   HorizontalAlignment="Center"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource MutedBrush}" />
+                                        <Button Content="Clear search"
+                                                Style="{StaticResource QuietButtonStyle}"
+                                                Height="32"
+                                                MinHeight="32"
+                                                Padding="12,0"
+                                                Command="{x:Static views:MainWindow.ClearCharacterSearchCommand}"
+                                                AutomationProperties.Name="Clear character search" />
                                     </StackPanel>
                                 </Grid>
                             </StackPanel>
@@ -1032,13 +1277,24 @@
 
                                     <StackPanel Grid.Column="1"
                                                 VerticalAlignment="Center">
-                                        <TextBlock Text="Selected Character"
-                                                   Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Text="SELECTED CHARACTER"
+                                                   Style="{StaticResource EyebrowTextStyle}" />
                                         <TextBlock Text="{Binding SelectedCharacter.Name, TargetNullValue='No character selected'}"
-                                                   Margin="0,2,8,0"
-                                                   Style="{StaticResource EyebrowTextStyle}"
+                                                   Margin="0,3,10,0"
+                                                   FontSize="16"
+                                                   FontWeight="SemiBold"
                                                    Foreground="{StaticResource InfoBrush}"
-                                                   TextTrimming="CharacterEllipsis" />
+                                                   TextWrapping="Wrap"
+                                                   TextTrimming="None" />
+                                         <WrapPanel Margin="0,5,10,0">
+                                             <TextBlock Text="{Binding SelectedCharacter.SkinLabel}"
+                                                        FontSize="11"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource MutedBrush}"
+                                                        MaxWidth="110"
+                                                        TextTrimming="CharacterEllipsis"
+                                                        ToolTip="{Binding SelectedCharacter.SkinLabel}" />
+                                         </WrapPanel>
                                     </StackPanel>
 
                                     <Button Grid.Column="2"
@@ -1094,10 +1350,41 @@
                                                 CornerRadius="999"
                                                 Background="{StaticResource InfoSoftBrush}">
                                             <TextBlock Text="Drag on desktop"
-                                                       FontSize="10"
+                                                       FontSize="11"
                                                        FontWeight="SemiBold"
                                                        Foreground="#FFA9EFFF" />
                                         </Border>
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource ControlGroupStyle}"
+                                        Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="104" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,14,0">
+                                            <TextBlock Text="Desktop frame rate"
+                                                       Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="30 saves power; 60 is balanced; 120 suits high-refresh displays"
+                                                       Margin="0,3,0,0"
+                                                       FontSize="11"
+                                                       Foreground="{StaticResource MutedBrush}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <ComboBox Grid.Column="1"
+                                                  ItemsSource="{Binding FrameRateOptions}"
+                                                  SelectedItem="{Binding TargetFrameRate, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"
+                                                  AutomationProperties.Name="Desktop pet frame rate in frames per second"
+                                                  AutomationProperties.HelpText="Choose 30 for lower power use, 60 for balanced animation, or 120 for high-refresh displays.">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding StringFormat={}{0} FPS}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
                                     </Grid>
                                 </Border>
 
@@ -1113,7 +1400,7 @@
                                                        Style="{StaticResource FieldLabelStyle}" />
                                             <TextBlock Text="Short clicks still play the action animation"
                                                        Margin="0,3,12,0"
-                                                       FontSize="10"
+                                                       FontSize="11"
                                                        Foreground="{StaticResource MutedBrush}" />
                                         </StackPanel>
                                         <CheckBox Grid.Column="1"
@@ -1244,9 +1531,10 @@
 
                                 <Button Style="{StaticResource DangerButtonStyle}"
                                         Height="38"
-                                        Click="OnRemoveSelectedCharacter"
+                                        Click="OnDeleteSelectedSkin"
                                         IsEnabled="{Binding HasSelectedCharacter}"
-                                        AutomationProperties.Name="Remove selected character">
+                                        ToolTip="Move the selected skin resources to the Recycle Bin"
+                                        AutomationProperties.Name="Delete selected skin">
                                     <StackPanel Orientation="Horizontal">
                                         <Path Width="13"
                                               Height="14"
@@ -1256,7 +1544,7 @@
                                               StrokeThickness="1.6"
                                               StrokeStartLineCap="Round"
                                               Data="M2,4 L12,4 M5,4 L5,2 L9,2 L9,4 M4,6 L4.7,13 L9.3,13 L10,6 M6.5,7 L6.5,11 M8.5,7 L8.5,11" />
-                                        <TextBlock Text="Remove Character" />
+                                        <TextBlock Text="Delete Current Skin" />
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
@@ -1269,22 +1557,8 @@
                         Height="44"
                         Margin="0,12,0,0"
                         Click="OnExitConfiguration"
-                        AutomationProperties.Name="Finish configuration">
-                    <Grid>
-                        <TextBlock Text="Finish Configuration"
-                                   HorizontalAlignment="Center" />
-                        <Path Width="14"
-                              Height="10"
-                              HorizontalAlignment="Right"
-                              Margin="0,0,2,0"
-                              Stretch="Uniform"
-                              Stroke="White"
-                              StrokeThickness="1.8"
-                              StrokeStartLineCap="Round"
-                              StrokeEndLineCap="Round"
-                              Data="M1,5 L12,5 M8,1 L12,5 L8,9" />
-                    </Grid>
-                </Button>
+                        Content="Finish Configuration"
+                        AutomationProperties.Name="Finish configuration" />
             </Grid>
         </Grid>
     </Border>

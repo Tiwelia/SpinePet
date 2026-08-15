@@ -8,6 +8,8 @@ import UnityPy
 
 
 RESOURCE_ID_PATTERN = re.compile(r"^c\d+_[^_]+$", re.IGNORECASE)
+RENDERABLE_TYPES = ("standing",)
+RESOURCE_TYPES = (*RENDERABLE_TYPES, "icons")
 
 
 def parse_args() -> argparse.Namespace:
@@ -16,6 +18,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--resource-id", required=True)
+    parser.add_argument(
+        "--resource-type",
+        required=True,
+        choices=RESOURCE_TYPES,
+    )
     parser.add_argument("--output-directory", required=True, type=Path)
     return parser.parse_args()
 
@@ -45,13 +52,43 @@ def get_atlas_pages(atlas_bytes: bytes) -> list[str]:
     return pages
 
 
-def main() -> None:
-    args = parse_args()
-    resource_id = args.resource_id.lower()
-    if not RESOURCE_ID_PATTERN.fullmatch(resource_id):
-        raise RuntimeError(f"Invalid resource ID: {args.resource_id}")
+def validate_image(image: object, asset_name: str) -> None:
+    if image.width <= 0 or image.height <= 0:
+        raise RuntimeError(f"'{asset_name}' has invalid image dimensions.")
 
-    environment = UnityPy.load(str(args.bundle))
+
+def extract_icon(
+    environment: object,
+    resource_id: str,
+    output_directory: Path,
+) -> None:
+    sprite_name = f"mi_{resource_id}_s"
+    matching_sprite = None
+    for obj in environment.objects:
+        if obj.type.name != "Sprite":
+            continue
+        sprite = obj.read()
+        if sprite.m_Name.lower() == sprite_name:
+            matching_sprite = sprite
+            break
+
+    if matching_sprite is None:
+        raise RuntimeError(f"Sprite '{sprite_name}' was not found.")
+
+    image = matching_sprite.image
+    validate_image(image, f"Sprite '{matching_sprite.m_Name}'")
+    output_directory.mkdir(parents=True, exist_ok=True)
+    output_name = f"{resource_id}_icon.png"
+    image.save(output_directory / output_name, format="PNG")
+    print(f"Extracted {resource_id} icons: {output_name}")
+
+
+def extract_renderable(
+    environment: object,
+    resource_id: str,
+    resource_type: str,
+    output_directory: Path,
+) -> None:
     text_assets: dict[str, bytes] = {}
     textures: dict[str, object] = {}
 
@@ -82,23 +119,37 @@ def main() -> None:
             )
         resolved_textures.append((page_name, texture))
 
-    args.output_directory.mkdir(parents=True, exist_ok=True)
-    (args.output_directory / skeleton_name).write_bytes(
-        text_assets[skeleton_name]
-    )
-    (args.output_directory / atlas_name).write_bytes(atlas_bytes)
+    output_directory.mkdir(parents=True, exist_ok=True)
+    (output_directory / skeleton_name).write_bytes(text_assets[skeleton_name])
+    (output_directory / atlas_name).write_bytes(atlas_bytes)
 
     for page_name, texture in resolved_textures:
         image = texture.image
-        if image.width <= 0 or image.height <= 0:
-            raise RuntimeError(
-                f"Texture2D '{texture.m_Name}' has invalid dimensions."
-            )
-        image.save(args.output_directory / page_name, format="PNG")
+        validate_image(image, f"Texture2D '{texture.m_Name}'")
+        image.save(output_directory / page_name, format="PNG")
 
     print(
-        f"Extracted {resource_id}: "
+        f"Extracted {resource_id} {resource_type}: "
         f"{skeleton_name}, {atlas_name}, {', '.join(atlas_pages)}"
+    )
+
+
+def main() -> None:
+    args = parse_args()
+    resource_id = args.resource_id.lower()
+    if not RESOURCE_ID_PATTERN.fullmatch(resource_id):
+        raise RuntimeError(f"Invalid resource ID: {args.resource_id}")
+
+    environment = UnityPy.load(str(args.bundle))
+    if args.resource_type == "icons":
+        extract_icon(environment, resource_id, args.output_directory)
+        return
+
+    extract_renderable(
+        environment,
+        resource_id,
+        args.resource_type,
+        args.output_directory,
     )
 
 

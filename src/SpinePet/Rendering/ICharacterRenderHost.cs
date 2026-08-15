@@ -1,6 +1,6 @@
 using SpinePet.Models;
 
-namespace SpinePet.Services;
+namespace SpinePet.Rendering;
 
 public interface ICharacterRenderHost
 {
@@ -24,6 +24,7 @@ public interface ICharacterRenderHost
     void PlayCharacterAnimation(string characterId, string animation, bool repeat);
     void SetConfigMode(bool configMode);
     void SetRenderDragEnabled(bool enabled);
+    void SetTargetFrameRate(int frameRate);
     void MoveCharacter(string characterId, double left, double top);
     void BeginCharacterMove();
     void EndCharacterMove();

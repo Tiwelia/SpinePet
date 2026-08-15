@@ -21,11 +21,12 @@ public sealed class CharacterIconServiceTests : IDisposable
     {
         string characterDirectory =
             Path.Combine(_temporaryDirectory, "Anis Star");
+        string skinDirectory = Path.Combine(characterDirectory, "00");
         string standingDirectory = Path.Combine(
-            characterDirectory,
+            skinDirectory,
             CharacterResourceTypes.Standing);
         string iconDirectory = Path.Combine(
-            characterDirectory,
+            skinDirectory,
             CharacterResourceTypes.Icons);
         Directory.CreateDirectory(standingDirectory);
         Directory.CreateDirectory(iconDirectory);

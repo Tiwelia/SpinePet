@@ -48,8 +48,9 @@ public sealed class CharacterIdentityService
         string characterCode = match.Groups["character"].Value;
         string skinCode = match.Groups["skin"].Value;
         string resourceName = match.Value;
-        string displayName =
-            _characterNames.TryGetValue(characterCode, out string? mappedName)
+        string displayName = TryGetCharacterName(
+            characterCode,
+            out string mappedName)
                 ? mappedName
                 : GetFallbackName(resourceStem, fallbackName, skinCode);
 
@@ -58,6 +59,24 @@ public sealed class CharacterIdentityService
             characterCode,
             skinCode,
             displayName);
+    }
+
+    public bool TryGetCharacterName(
+        string characterCode,
+        out string displayName)
+    {
+        if (!string.IsNullOrWhiteSpace(characterCode) &&
+            _characterNames.TryGetValue(
+                characterCode.Trim(),
+                out string? mappedName) &&
+            !string.IsNullOrWhiteSpace(mappedName))
+        {
+            displayName = mappedName;
+            return true;
+        }
+
+        displayName = string.Empty;
+        return false;
     }
 
     private static string GetFallbackName(

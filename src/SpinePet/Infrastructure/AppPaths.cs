@@ -5,10 +5,12 @@ namespace SpinePet.Infrastructure;
 internal static class AppPaths
 {
     private const string ApplicationDirectoryName = "SpinePet";
+    internal const string DataDirectoryEnvironmentVariable =
+        "SPINEPET_DATA_DIRECTORY";
 
-    public static string LocalDataDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        ApplicationDirectoryName);
+    public static string LocalDataDirectory { get; } =
+        ResolveLocalDataDirectory(Environment.GetEnvironmentVariable(
+            DataDirectoryEnvironmentVariable));
 
     public static string ConfigFile { get; } = Path.Combine(
         LocalDataDirectory,
@@ -26,8 +28,38 @@ internal static class AppPaths
 
     public static string BundleExtractorScript { get; } =
         ResolveBundledFile(
-            Path.Combine("src", "SpinePet", "Tools", "extract_spine_bundle.py"),
+            Path.Combine(
+                "src",
+                "SpinePet",
+                "Infrastructure",
+                "Import",
+                "Tools",
+                "extract_spine_bundle.py"),
             Path.Combine("Tools", "extract_spine_bundle.py"));
+
+    public static string CharacterIconDownloaderScript { get; } =
+        ResolveBundledFile(
+            Path.Combine(
+                "tools",
+                "icons-downloader",
+                "Update-CharacterIcons.ps1"),
+            Path.Combine(
+                "Tools",
+                "icons-downloader",
+                "Update-CharacterIcons.ps1"));
+
+    internal static string ResolveLocalDataDirectory(string? overridePath)
+    {
+        if (!string.IsNullOrWhiteSpace(overridePath))
+        {
+            return Path.GetFullPath(overridePath);
+        }
+
+        return Path.Combine(
+            Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData),
+            ApplicationDirectoryName);
+    }
 
     private static string FindProjectRoot()
     {

@@ -20,7 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SpinePet\SpinePet.csproj" />
-    <ProjectReference Include="..\..\src\SpineRuntime41\SpineRuntime41.csproj" />
   </ItemGroup>
 
 </Project>

@@ -139,6 +139,16 @@ internal sealed class NativeGraphicsDevice : IDisposable
         AppLogger.Write(nameof(NativeGraphicsDevice), "device-created");
         _context = _device.ImmediateContext;
         _dxgiDevice = _device.QueryInterface<IDXGIDevice>();
+        _dxgiDevice.GetAdapter(out IDXGIAdapter adapter).CheckError();
+        using (adapter)
+        {
+            AdapterDescription description = adapter.Description;
+            AppLogger.Write(
+                nameof(NativeGraphicsDevice),
+                $"adapter={description.Description} " +
+                $"dedicated-video-mb={description.DedicatedVideoMemory / 1024 / 1024} " +
+                $"shared-system-mb={description.SharedSystemMemory / 1024 / 1024}");
+        }
         _factory = CreateDXGIFactory2<IDXGIFactory2>(debug: false);
         AppLogger.Write(nameof(NativeGraphicsDevice), "dxgi-created");
         _compositionDevice =
@@ -305,14 +315,14 @@ internal sealed class NativeGraphicsDevice : IDisposable
         foreach (NativeSpineDrawBatch batch in batches)
         {
             EnsureDynamicBuffers(
-                batch.Vertices.Length,
-                batch.Indices.Length);
+                batch.VertexCount,
+                batch.IndexCount);
             UploadSpan<NativeSpineVertex>(
                 _vertexBuffer!,
-                batch.Vertices);
+                batch.Vertices.AsSpan(0, batch.VertexCount));
             UploadSpan<int>(
                 _indexBuffer!,
-                batch.Indices);
+                batch.Indices.AsSpan(0, batch.IndexCount));
 
             ShaderConstants constants = new(transform);
             UploadValue(_constantBuffer, constants);
@@ -329,7 +339,7 @@ internal sealed class NativeGraphicsDevice : IDisposable
             _context.PSSetShaderResource(0, texture.View);
             _context.OMSetBlendState(GetBlendState(batch.BlendMode));
             _context.DrawIndexed(
-                checked((uint)batch.Indices.Length),
+                checked((uint)batch.IndexCount),
                 0,
                 0);
         }

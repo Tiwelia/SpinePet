@@ -53,23 +53,29 @@ public sealed class CharacterResourceDiscoveryServiceTests : IDisposable
     }
 
     [Fact]
-    public void DiscoverGroupsSkinsAndFindsAllRenderableStates()
+    public void DiscoverGroupsSkinsAndIgnoresRetiredStateDirectories()
     {
         string characterDirectory =
             Path.Combine(_temporaryDirectory, "Anis Star");
+        string skin00Directory = Path.Combine(characterDirectory, "00");
+        string skin01Directory = Path.Combine(characterDirectory, "01");
         CreateResourceSet(
-            Path.Combine(characterDirectory, CharacterResourceTypes.Standing),
+            Path.Combine(
+                skin00Directory,
+                CharacterResourceTypes.Standing),
             "c017_00");
         CreateResourceSet(
-            Path.Combine(characterDirectory, CharacterResourceTypes.Standing),
+            Path.Combine(
+                skin01Directory,
+                CharacterResourceTypes.Standing),
             "c017_01");
         CreateResourceSet(
-            Path.Combine(characterDirectory, CharacterResourceTypes.Aim),
+            Path.Combine(skin00Directory, "aim"),
             "c017_00");
         Directory.CreateDirectory(
-            Path.Combine(characterDirectory, CharacterResourceTypes.Cover));
+            Path.Combine(skin00Directory, "cover"));
         string iconDirectory =
-            Path.Combine(characterDirectory, CharacterResourceTypes.Icons);
+            Path.Combine(skin00Directory, CharacterResourceTypes.Icons);
         Directory.CreateDirectory(iconDirectory);
         File.WriteAllBytes(
             Path.Combine(iconDirectory, "c017_00_icon.png"),
@@ -82,14 +88,90 @@ public sealed class CharacterResourceDiscoveryServiceTests : IDisposable
             service.DiscoverAll(_temporaryDirectory);
 
         Assert.Equal(2, standing.Count);
-        Assert.Equal(3, all.Count);
-        CharacterResourceFiles aim = Assert.Single(
+        Assert.Equal(2, all.Count);
+        Assert.All(
             all,
-            resource => string.Equals(
-                resource.ResourceType,
-                CharacterResourceTypes.Aim,
+            resource => Assert.Equal(
+                CharacterResourceTypes.Standing,
+                resource.ResourceType));
+        Assert.DoesNotContain(
+            all,
+            resource => resource.SkeletonPath.Contains(
+                $"{Path.DirectorySeparatorChar}aim{Path.DirectorySeparatorChar}",
                 StringComparison.OrdinalIgnoreCase));
-        Assert.Equal("c017_00", aim.Identity.ResourceName);
+    }
+
+    [Fact]
+    public void DiscoverUsesCharacterLayerAsFallbackDisplayName()
+    {
+        string standingDirectory = Path.Combine(
+            _temporaryDirectory,
+            "Fallback Hero",
+            "07",
+            CharacterResourceTypes.Standing);
+        CreateResourceSet(standingDirectory, "c999_07");
+        CharacterIdentityService identityService = new(
+            new Dictionary<string, string>());
+        CharacterResourceDiscoveryService service = new(identityService);
+
+        CharacterResourceFiles resource = Assert.Single(
+            service.Discover(_temporaryDirectory));
+
+        Assert.Equal("Fallback Hero", resource.Identity.DisplayName);
+        Assert.Equal("07", resource.Identity.SkinCode);
+    }
+
+    [Fact]
+    public void DiscoverAllReadsLegacyStandingButIgnoresLegacyAim()
+    {
+        string aimDirectory = Path.Combine(
+            _temporaryDirectory,
+            "Legacy Hero",
+            "aim");
+        CreateResourceSet(aimDirectory, "c999_03");
+        string standingDirectory = Path.Combine(
+            _temporaryDirectory,
+            "Legacy Hero",
+            CharacterResourceTypes.Standing);
+        CreateResourceSet(standingDirectory, "c999_03");
+        CharacterIdentityService identityService = new(
+            new Dictionary<string, string>());
+        CharacterResourceDiscoveryService service = new(identityService);
+
+        CharacterResourceFiles resource = Assert.Single(
+            service.DiscoverAll(_temporaryDirectory));
+
+        Assert.Equal(CharacterResourceTypes.Standing, resource.ResourceType);
+        Assert.Equal("Legacy Hero", resource.Identity.DisplayName);
+        Assert.Equal("03", resource.Identity.SkinCode);
+        Assert.Equal(standingDirectory, Path.GetDirectoryName(
+            resource.SkeletonPath));
+        Assert.Null(service.DiscoverForSkeleton(
+            Path.Combine(aimDirectory, "c999_03.skel")));
+    }
+
+    [Fact]
+    public void DiscoverForSkeletonUsesEveryExistingAtlasPage()
+    {
+        string directory = Path.Combine(_temporaryDirectory, "source");
+        Directory.CreateDirectory(directory);
+        string skeletonPath = Path.Combine(directory, "c999_02.skel");
+        File.WriteAllBytes(skeletonPath, []);
+        File.WriteAllText(
+            Path.Combine(directory, "c999_02.atlas"),
+            "page-a.png\nsize: 1,1\npage-b.png\nsize: 1,1\n");
+        File.WriteAllBytes(Path.Combine(directory, "page-a.png"), []);
+        File.WriteAllBytes(Path.Combine(directory, "page-b.png"), []);
+
+        CharacterResourceDiscoveryService service = new();
+        CharacterResourceFiles? resource =
+            service.DiscoverForSkeleton(skeletonPath);
+
+        Assert.NotNull(resource);
+        Assert.EndsWith("page-a.png", resource.PrimaryTexturePath);
+        Assert.Collection(
+            resource.AdditionalTexturePaths,
+            path => Assert.EndsWith("page-b.png", path));
     }
 
     [Fact]
@@ -103,6 +185,31 @@ public sealed class CharacterResourceDiscoveryServiceTests : IDisposable
         Assert.Null(service.DiscoverForSkeleton(textPath));
     }
 
+    [Fact]
+    public void DiscoverAllSkipsSkeletonsFromUnsupportedRuntimeVersions()
+    {
+        string standingDirectory = Path.Combine(
+            _temporaryDirectory,
+            "Old Export",
+            "00",
+            CharacterResourceTypes.Standing);
+        CreateResourceSet(standingDirectory, "c999_00");
+        WriteSkeletonHeader(
+            Path.Combine(standingDirectory, "c999_00.skel"),
+            "4.0.47");
+        CharacterResourceDiscoveryService service = new(
+            new CharacterIdentityService(
+                new Dictionary<string, string>
+                {
+                    ["999"] = "Old Export"
+                }));
+
+        Assert.Empty(service.DiscoverAll(_temporaryDirectory));
+        Assert.NotNull(service.DiscoverForSkeleton(Path.Combine(
+            standingDirectory,
+            "c999_00.skel")));
+    }
+
     private void CreateCharacter(
         string directoryName,
         string fileName,
@@ -111,7 +218,7 @@ public sealed class CharacterResourceDiscoveryServiceTests : IDisposable
     {
         string directory = Path.Combine(_temporaryDirectory, directoryName);
         Directory.CreateDirectory(directory);
-        File.WriteAllBytes(Path.Combine(directory, $"{fileName}.skel"), []);
+        WriteSkeletonHeader(Path.Combine(directory, $"{fileName}.skel"));
         File.WriteAllText(Path.Combine(directory, $"{fileName}.atlas"), string.Empty);
         File.WriteAllBytes(Path.Combine(directory, $"{fileName}_a.png"), []);
 
@@ -133,15 +240,25 @@ public sealed class CharacterResourceDiscoveryServiceTests : IDisposable
         string resourceName)
     {
         Directory.CreateDirectory(directory);
-        File.WriteAllBytes(
-            Path.Combine(directory, $"{resourceName}.skel"),
-            []);
+        WriteSkeletonHeader(
+            Path.Combine(directory, $"{resourceName}.skel"));
         File.WriteAllText(
             Path.Combine(directory, $"{resourceName}.atlas"),
             string.Empty);
         File.WriteAllBytes(
             Path.Combine(directory, $"{resourceName}.png"),
             []);
+    }
+
+    private static void WriteSkeletonHeader(
+        string path,
+        string version = "4.1.24")
+    {
+        byte[] versionBytes = System.Text.Encoding.UTF8.GetBytes(version);
+        using FileStream stream = File.Create(path);
+        stream.Write(new byte[8]);
+        stream.WriteByte((byte)(versionBytes.Length + 1));
+        stream.Write(versionBytes);
     }
 
     public void Dispose()

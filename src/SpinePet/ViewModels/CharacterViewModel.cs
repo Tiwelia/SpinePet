@@ -9,11 +9,7 @@ public sealed class CharacterViewModel : INotifyPropertyChanged
 {
     private string _name = string.Empty;
     private string _skinLabel = string.Empty;
-    private string _resourceType = CharacterResourceTypes.Standing;
     private string _thumbnailPath = string.Empty;
-    private bool _hasStandingResources;
-    private bool _hasAimResources;
-    private bool _hasCoverResources;
     private double _scale = 0.2;
     private double _maxScale = 1.35;
     private int _positionX = 200;
@@ -28,70 +24,29 @@ public sealed class CharacterViewModel : INotifyPropertyChanged
     public string Name
     {
         get => _name;
-        set => SetProperty(ref _name, value);
+        set
+        {
+            if (!SetProperty(ref _name, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(AccessibilitySummary));
+            OnPropertyChanged(nameof(VisibilityActionAutomationLabel));
+        }
     }
 
     public string SkinLabel
     {
         get => _skinLabel;
-        set => SetProperty(ref _skinLabel, value);
-    }
-
-    public string ResourceType
-    {
-        get => _resourceType;
-        private set
+        set
         {
-            if (!SetProperty(ref _resourceType, value))
+            if (SetProperty(ref _skinLabel, value))
             {
-                return;
+                OnPropertyChanged(nameof(AccessibilitySummary));
             }
-
-            OnPropertyChanged(nameof(ResourceTypeLabel));
-            OnPropertyChanged(nameof(IsStandingResources));
-            OnPropertyChanged(nameof(IsAimResources));
-            OnPropertyChanged(nameof(IsCoverResources));
         }
     }
-
-    public string ResourceTypeLabel =>
-        CharacterResourceTypes.GetDisplayName(ResourceType);
-
-    public bool HasStandingResources
-    {
-        get => _hasStandingResources;
-        private set => SetProperty(ref _hasStandingResources, value);
-    }
-
-    public bool HasAimResources
-    {
-        get => _hasAimResources;
-        private set => SetProperty(ref _hasAimResources, value);
-    }
-
-    public bool HasCoverResources
-    {
-        get => _hasCoverResources;
-        private set => SetProperty(ref _hasCoverResources, value);
-    }
-
-    public bool IsStandingResources =>
-        string.Equals(
-            ResourceType,
-            CharacterResourceTypes.Standing,
-            StringComparison.OrdinalIgnoreCase);
-
-    public bool IsAimResources =>
-        string.Equals(
-            ResourceType,
-            CharacterResourceTypes.Aim,
-            StringComparison.OrdinalIgnoreCase);
-
-    public bool IsCoverResources =>
-        string.Equals(
-            ResourceType,
-            CharacterResourceTypes.Cover,
-            StringComparison.OrdinalIgnoreCase);
 
     public string ThumbnailPath
     {
@@ -131,6 +86,9 @@ public sealed class CharacterViewModel : INotifyPropertyChanged
             if (SetProperty(ref _isVisible, value))
             {
                 OnPropertyChanged(nameof(VisibilityActionLabel));
+                OnPropertyChanged(nameof(VisibilityActionAutomationLabel));
+                OnPropertyChanged(nameof(VisibilityStateLabel));
+                OnPropertyChanged(nameof(AccessibilitySummary));
             }
         }
     }
@@ -143,6 +101,9 @@ public sealed class CharacterViewModel : INotifyPropertyChanged
             if (SetProperty(ref _isLoading, value))
             {
                 OnPropertyChanged(nameof(VisibilityActionLabel));
+                OnPropertyChanged(nameof(VisibilityActionAutomationLabel));
+                OnPropertyChanged(nameof(VisibilityStateLabel));
+                OnPropertyChanged(nameof(AccessibilitySummary));
                 OnPropertyChanged(nameof(CanToggleVisibility));
             }
         }
@@ -151,7 +112,24 @@ public sealed class CharacterViewModel : INotifyPropertyChanged
     public bool CanToggleVisibility => !IsLoading;
 
     public string VisibilityActionLabel =>
-        IsLoading ? "Loading..." : IsVisible ? "Hide" : "Show";
+        IsLoading ? "Loading…" : IsVisible ? "Hide" : "Show";
+
+    public string VisibilityActionAutomationLabel =>
+        IsLoading
+            ? $"Loading {Name}"
+            : IsVisible
+                ? $"Hide {Name}"
+                : $"Show {Name}";
+
+    public string VisibilityStateLabel =>
+        IsLoading
+            ? "Loading"
+            : IsVisible
+                ? "Visible on desktop"
+                : "Hidden on desktop";
+
+    public string AccessibilitySummary =>
+        $"{Name}, {SkinLabel}, {VisibilityStateLabel}";
 
     public string ConfiguredAnimation
     {
@@ -167,6 +145,20 @@ public sealed class CharacterViewModel : INotifyPropertyChanged
 
     public ObservableCollection<string> AnimationNames { get; } = new();
 
+    public ObservableCollection<CharacterSkinOptionViewModel> AvailableSkins
+    {
+        get;
+    } = new();
+
+    public string AvailableSkinSearchText => string.Join(
+        ' ',
+        AvailableSkins.SelectMany(skin => new[]
+        {
+            skin.Label,
+            skin.SkinCode,
+            skin.ResourceName
+        }));
+
     public void UpdateAnimationNames(IEnumerable<string> animationNames)
     {
         AnimationNames.Clear();
@@ -176,21 +168,40 @@ public sealed class CharacterViewModel : INotifyPropertyChanged
         }
     }
 
-    public void UpdateResourceTypes(
-        string currentResourceType,
-        IEnumerable<string> availableResourceTypes)
+    public void UpdateSkins(
+        string currentSkinCode,
+        IEnumerable<CharacterIdentity> identities)
     {
-        HashSet<string> available = new(
-            availableResourceTypes,
-            StringComparer.OrdinalIgnoreCase);
-        ResourceType =
-            CharacterResourceTypes.Normalize(currentResourceType);
-        HasStandingResources =
-            available.Contains(CharacterResourceTypes.Standing);
-        HasAimResources =
-            available.Contains(CharacterResourceTypes.Aim);
-        HasCoverResources =
-            available.Contains(CharacterResourceTypes.Cover);
+        CharacterSkinOptionViewModel[] options = identities
+            .Where(identity => !string.IsNullOrWhiteSpace(identity.SkinCode))
+            .GroupBy(
+                identity => identity.ResourceName,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(identity => identity.SkinCode, StringComparer.OrdinalIgnoreCase)
+            .Select(identity => new CharacterSkinOptionViewModel(
+                Id,
+                identity.CharacterCode,
+                identity.ResourceName,
+                identity.SkinCode,
+                string.Equals(
+                    identity.SkinCode,
+                    currentSkinCode,
+                    StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+
+        if (AvailableSkins.SequenceEqual(options))
+        {
+            return;
+        }
+
+        AvailableSkins.Clear();
+        foreach (CharacterSkinOptionViewModel option in options)
+        {
+            AvailableSkins.Add(option);
+        }
+
+        OnPropertyChanged(nameof(AvailableSkinSearchText));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

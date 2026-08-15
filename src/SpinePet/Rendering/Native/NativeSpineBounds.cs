@@ -119,8 +119,9 @@ internal static class NativeSpineEnvelopeCalculator
         NativeSpineBounds bounds = NativeSpineBounds.Empty;
         foreach (NativeSpineDrawBatch batch in batches)
         {
-            foreach (NativeSpineVertex vertex in batch.Vertices)
+            for (int index = 0; index < batch.VertexCount; index++)
             {
+                NativeSpineVertex vertex = batch.Vertices[index];
                 bounds = bounds.Union(
                     new NativeSpineBounds(
                         vertex.Position.X,

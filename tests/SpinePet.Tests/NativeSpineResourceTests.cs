@@ -1,7 +1,8 @@
-using SpinePet.Models;
-using SpinePet.Rendering.Native;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using SpinePet.Models;
+using SpinePet.Rendering.Native;
+using SpinePet.Services;
 
 namespace SpinePet.Tests;
 
@@ -77,22 +78,16 @@ public sealed class NativeSpineResourceTests
         if (!Directory.Exists(resourceRoot))
             return;
 
-        string[] atlases = Directory.GetFiles(
-            resourceRoot,
-            "*.atlas",
-            SearchOption.AllDirectories);
-        Assert.NotEmpty(atlases);
+        IReadOnlyList<CharacterResourceFiles> installedResources =
+            new CharacterResourceDiscoveryService().DiscoverAll(resourceRoot);
+        Assert.NotEmpty(installedResources);
 
-        foreach (string atlasPath in atlases)
+        foreach (CharacterResourceFiles installed in installedResources)
         {
-            string skeletonPath = Path.ChangeExtension(atlasPath, ".skel");
-            if (!File.Exists(skeletonPath))
-                continue;
-
             CharacterConfig config = new()
             {
-                AtlasPath = atlasPath,
-                SkeletonPath = skeletonPath
+                AtlasPath = installed.AtlasPath,
+                SkeletonPath = installed.SkeletonPath
             };
 
             using NativeSpineResource resource = NativeSpineResource.Load(config);
@@ -104,7 +99,38 @@ public sealed class NativeSpineResourceTests
             resource.Update(1f / 60f);
 
             NativeSpineGeometry geometry = new();
-            Assert.NotEmpty(geometry.Build(resource.Skeleton));
+            IReadOnlyList<NativeSpineDrawBatch> firstBuild =
+                geometry.Build(resource.Skeleton);
+            Assert.NotEmpty(firstBuild);
+            NativeSpineVertex[][] vertexBuffers = firstBuild
+                .Select(batch => batch.Vertices)
+                .ToArray();
+            int[][] indexBuffers = firstBuild
+                .Select(batch => batch.Indices)
+                .ToArray();
+
+            IReadOnlyList<NativeSpineDrawBatch> secondBuild =
+                geometry.Build(resource.Skeleton);
+
+            Assert.Same(firstBuild, secondBuild);
+            Assert.Equal(vertexBuffers.Length, secondBuild.Count);
+            for (int batchIndex = 0;
+                 batchIndex < secondBuild.Count;
+                 batchIndex++)
+            {
+                NativeSpineDrawBatch batch = secondBuild[batchIndex];
+                Assert.Same(vertexBuffers[batchIndex], batch.Vertices);
+                Assert.Same(indexBuffers[batchIndex], batch.Indices);
+                Assert.InRange(
+                    batch.VertexCount,
+                    1,
+                    batch.Vertices.Length);
+                Assert.InRange(
+                    batch.IndexCount,
+                    1,
+                    batch.Indices.Length);
+            }
+
             Assert.StartsWith("4.1", resource.SkeletonData.Version);
             Assert.NotEmpty(resource.TextureLoader.Textures);
         }

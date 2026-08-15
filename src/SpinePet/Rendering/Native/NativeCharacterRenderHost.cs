@@ -5,7 +5,7 @@ using System.Windows.Threading;
 using Spine;
 using SpinePet.Infrastructure;
 using SpinePet.Models;
-using SpinePet.Services;
+using SpinePet.Rendering;
 
 namespace SpinePet.Rendering.Native;
 
@@ -22,14 +22,25 @@ public sealed class NativeCharacterRenderHost :
     private const int WmLeftButtonDown = 0x0201;
     private const int WmLeftButtonUp = 0x0202;
     private const int WmCaptureChanged = 0x0215;
+    private const double PerformanceWindowSeconds = 2;
+    private static readonly TimeSpan WorkingAreaRefreshInterval =
+        TimeSpan.FromSeconds(1);
 
     private readonly Dictionary<string, NativeCharacterState> _states =
         new(StringComparer.Ordinal);
+    private readonly List<PendingFrame> _pendingFrames = [];
+    private readonly List<Rectangle> _interactiveRegions = [];
+    private readonly List<Rectangle> _workingAreas = [];
     private readonly NativeCharacterZOrder _zOrder = new();
     private readonly Dispatcher _dispatcher;
-    private readonly DispatcherTimer _frameTimer;
+    private readonly NativeFrameScheduler _frameScheduler;
     private readonly DispatcherTimer _scaleSettleTimer;
     private readonly Stopwatch _frameClock = new();
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private readonly bool _performanceTelemetryEnabled = string.Equals(
+        Environment.GetEnvironmentVariable("SPINEPET_PERF_LOG"),
+        "1",
+        StringComparison.Ordinal);
     private readonly HashSet<string> _scaleShrinkPending =
         new(StringComparer.Ordinal);
     private NativeCompositionWindow? _window;
@@ -48,18 +59,23 @@ public sealed class NativeCharacterRenderHost :
     private bool _pointerDragging;
     private bool _pointerMovePending;
     private int _explicitMoveDepth;
+    private int _targetFrameRate = GlobalConfig.DefaultTargetFrameRate;
+    private long _workingAreasRefreshTimestamp;
+    private long _performanceWindowStartTimestamp;
+    private long _performanceFrameTicks;
+    private long _performanceMaximumFrameTicks;
+    private long _performanceAllocatedBytes;
+    private int _performanceFrameCount;
 
     public NativeCharacterRenderHost()
     {
         _dispatcher = System.Windows.Application.Current?.Dispatcher ??
             Dispatcher.CurrentDispatcher;
-        _frameTimer = new DispatcherTimer(
-            DispatcherPriority.Background,
-            _dispatcher)
-        {
-            Interval = TimeSpan.FromSeconds(1.0 / 60.0)
-        };
-        _frameTimer.Tick += OnFrame;
+        _frameScheduler = new NativeFrameScheduler(
+            _dispatcher,
+            OnFrame,
+            TimeSpan.FromSeconds(
+                1.0 / GlobalConfig.DefaultTargetFrameRate));
         _scaleSettleTimer = new DispatcherTimer(
             DispatcherPriority.Background,
             _dispatcher)
@@ -100,6 +116,12 @@ public sealed class NativeCharacterRenderHost :
             ? state.CurrentScale
             : DefaultScale;
 
+    internal bool IsFrameLoopRunning => _frameScheduler.IsRunning;
+
+    internal int TargetFrameRate => _targetFrameRate;
+
+    internal TimeSpan FrameInterval => _frameScheduler.Interval;
+
     public Task InitializeAsync()
     {
         _initializationTask ??= _dispatcher.CheckAccess()
@@ -135,6 +157,7 @@ public sealed class NativeCharacterRenderHost :
             UpdateSurfacePosition(state);
             _compositionDirty = true;
             RenderFrame(0);
+            UpdateFrameTimerState();
             CharactersStateChanged?.Invoke();
             return;
         }
@@ -147,13 +170,16 @@ public sealed class NativeCharacterRenderHost :
         {
             var loaded = await Task.Run(() =>
             {
+                _lifetimeCancellation.Token.ThrowIfCancellationRequested();
                 NativeSpineResource resource =
                     NativeSpineResource.Load(character);
                 try
                 {
+                    _lifetimeCancellation.Token.ThrowIfCancellationRequested();
                     var bounds =
                         NativeSpineEnvelopeCalculator.Calculate(
                             resource.SkeletonData);
+                    _lifetimeCancellation.Token.ThrowIfCancellationRequested();
                     return (resource, bounds.Setup, bounds.Envelope);
                 }
                 catch
@@ -161,7 +187,7 @@ public sealed class NativeCharacterRenderHost :
                     resource.Dispose();
                     throw;
                 }
-            });
+            }, _lifetimeCancellation.Token);
 
             await _dispatcher.InvokeAsync(() =>
             {
@@ -169,7 +195,8 @@ public sealed class NativeCharacterRenderHost :
                         character.Id,
                         out NativeCharacterState? current) ||
                     !ReferenceEquals(current, state) ||
-                    current.LoadVersion != loadVersion)
+                    current.LoadVersion != loadVersion ||
+                    _closed)
                 {
                     loaded.resource.Dispose();
                     return;
@@ -179,13 +206,17 @@ public sealed class NativeCharacterRenderHost :
                 current.SetupBounds = loaded.Setup;
                 current.Envelope = loaded.Envelope;
                 current.Surface = _graphics!.CreateSurface();
-                if (current.Surface.SetVisible(true))
+                if (current.Surface.SetVisible(current.IsVisible) &&
+                    current.IsVisible)
+                {
                     _zOrder.MoveToTop(current.Config.Id);
+                }
                 current.IsLoading = false;
                 SelectModeAnimation(current);
                 UpdateSurfacePosition(current);
                 _compositionDirty = true;
                 RenderFrame(0);
+                UpdateFrameTimerState();
 
                 if (string.IsNullOrWhiteSpace(
                         current.Config.ConfiguredAnimation) &&
@@ -205,6 +236,11 @@ public sealed class NativeCharacterRenderHost :
                 CharactersStateChanged?.Invoke();
             });
         }
+        catch (OperationCanceledException)
+            when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            // Closing the render host intentionally abandons in-flight loads.
+        }
         catch (Exception exception)
         {
             await _dispatcher.InvokeAsync(() =>
@@ -221,6 +257,7 @@ public sealed class NativeCharacterRenderHost :
                 current.IsLoading = false;
                 current.IsVisible = false;
                 current.Config.Visible = false;
+                UpdateFrameTimerState();
                 AppLogger.Write(
                     nameof(NativeCharacterRenderHost),
                     $"character-load-failed id={character.Id} message={exception.Message}");
@@ -245,6 +282,7 @@ public sealed class NativeCharacterRenderHost :
         state.IsLoading = false;
         state.Config.Visible = false;
         state.Surface?.SetVisible(false);
+        UpdateFrameTimerState();
         CommitComposition();
         CharactersStateChanged?.Invoke();
     }
@@ -263,6 +301,7 @@ public sealed class NativeCharacterRenderHost :
         _scaleShrinkPending.Remove(characterId);
         _zOrder.Remove(characterId);
         state.Dispose();
+        UpdateFrameTimerState();
         PurgeUnusedTextures();
         CommitComposition();
         CharactersStateChanged?.Invoke();
@@ -340,6 +379,20 @@ public sealed class NativeCharacterRenderHost :
             CancelPointerInteraction(commitPosition: true);
     }
 
+    public void SetTargetFrameRate(int frameRate)
+    {
+        int normalized = GlobalConfig.NormalizeTargetFrameRate(frameRate);
+        if (!_dispatcher.CheckAccess())
+        {
+            _dispatcher.Invoke(() => SetTargetFrameRate(normalized));
+            return;
+        }
+
+        _targetFrameRate = normalized;
+        _frameScheduler.SetInterval(
+            TimeSpan.FromSeconds(1.0 / normalized));
+    }
+
     public void MoveCharacter(
         string characterId,
         double left,
@@ -402,6 +455,7 @@ public sealed class NativeCharacterRenderHost :
             state.Surface?.SetVisible(false);
         }
 
+        UpdateFrameTimerState();
         CommitComposition();
         CharactersStateChanged?.Invoke();
     }
@@ -413,10 +467,21 @@ public sealed class NativeCharacterRenderHost :
         foreach (CharacterConfig character in characters.Where(
                      character => character.Visible))
         {
-            await ShowCharacterAsync(
-                character,
-                configMode,
-                character.AnimationSpeed);
+            try
+            {
+                await ShowCharacterAsync(
+                    character,
+                    configMode,
+                    character.AnimationSpeed);
+            }
+            catch (Exception exception)
+            {
+                AppLogger.Write(
+                    nameof(NativeCharacterRenderHost),
+                    $"character-restore-skipped id={character.Id} " +
+                    $"error={exception.GetType().Name} " +
+                    $"message={exception.Message}");
+            }
         }
     }
 
@@ -431,8 +496,9 @@ public sealed class NativeCharacterRenderHost :
         if (_closed)
             return;
         _closed = true;
+        _lifetimeCancellation.Cancel();
 
-        _frameTimer.Stop();
+        _frameScheduler.Dispose();
         _scaleSettleTimer.Stop();
         foreach (NativeCharacterState state in _states.Values)
             state.Dispose();
@@ -442,6 +508,7 @@ public sealed class NativeCharacterRenderHost :
         _graphics = null;
         _window?.Dispose();
         _window = null;
+        _lifetimeCancellation.Dispose();
     }
 
     public void Dispose()
@@ -459,12 +526,32 @@ public sealed class NativeCharacterRenderHost :
         _window.HitTestScreenPoint = HitTestScreenPoint;
         _window.MouseInput = OnNativeMouseInput;
         _graphics = new NativeGraphicsDevice(_window.Handle);
-        _frameClock.Restart();
-        _frameTimer.Start();
         AppLogger.Write(
             nameof(NativeCharacterRenderHost),
             $"initialized window={_window.Handle} size={_window.Width}x{_window.Height} dpi={_window.DpiScale:F2}");
         return Task.CompletedTask;
+    }
+
+    private void UpdateFrameTimerState()
+    {
+        bool shouldRun = !_closed && _states.Values.Any(state =>
+            state.IsVisible &&
+            state.Resource != null &&
+            state.Surface != null);
+        if (shouldRun == _frameScheduler.IsRunning)
+        {
+            return;
+        }
+
+        if (shouldRun)
+        {
+            _frameClock.Restart();
+            _frameScheduler.Start();
+            return;
+        }
+
+        _frameScheduler.Stop();
+        _frameClock.Reset();
     }
 
     private NativeCharacterState GetOrCreateState(CharacterConfig character)
@@ -492,7 +579,7 @@ public sealed class NativeCharacterRenderHost :
         return state;
     }
 
-    private void OnFrame(object? sender, EventArgs eventArgs)
+    private void OnFrame()
     {
         double elapsed = _frameClock.Elapsed.TotalSeconds;
         _frameClock.Restart();
@@ -532,14 +619,17 @@ public sealed class NativeCharacterRenderHost :
         if (_renderingFrame || _graphics == null || _window == null)
             return;
 
+        long frameStartedTimestamp = _performanceTelemetryEnabled
+            ? Stopwatch.GetTimestamp()
+            : 0;
+        long frameStartedAllocatedBytes = _performanceTelemetryEnabled
+            ? GC.GetAllocatedBytesForCurrentThread()
+            : 0;
         _renderingFrame = true;
         try
         {
             FlushPendingPointerMove();
-            List<(
-                NativeCharacterState State,
-                IReadOnlyList<NativeSpineDrawBatch> Batches,
-                float PixelScale)> pendingFrames = [];
+            _pendingFrames.Clear();
             foreach (NativeCharacterState state in _states.Values)
             {
                 if (!state.IsVisible ||
@@ -564,11 +654,14 @@ public sealed class NativeCharacterRenderHost :
                 UpdateSurfacePosition(state);
                 UpdateScreenBounds(state, batches, pixelScale);
                 state.LastBatches = batches;
-                pendingFrames.Add((state, batches, pixelScale));
+                _pendingFrames.Add(new PendingFrame(
+                    state,
+                    batches,
+                    pixelScale));
             }
 
             UpdateWindowRegions();
-            foreach (var frame in pendingFrames)
+            foreach (PendingFrame frame in _pendingFrames)
             {
                 _graphics.Render(
                     frame.State.Surface!,
@@ -576,7 +669,7 @@ public sealed class NativeCharacterRenderHost :
                     frame.State.Surface!.GetTransform(frame.PixelScale));
             }
 
-            bool rendered = pendingFrames.Count > 0;
+            bool rendered = _pendingFrames.Count > 0;
             if (rendered || _compositionDirty)
             {
                 _graphics.Commit();
@@ -592,8 +685,74 @@ public sealed class NativeCharacterRenderHost :
         finally
         {
             UpdateWindowInputState();
+            if (_performanceTelemetryEnabled)
+            {
+                RecordPerformanceFrame(
+                    frameStartedTimestamp,
+                    frameStartedAllocatedBytes,
+                    _pendingFrames.Count);
+            }
+
+            _pendingFrames.Clear();
             _renderingFrame = false;
         }
+    }
+
+    private void RecordPerformanceFrame(
+        long frameStartedTimestamp,
+        long frameStartedAllocatedBytes,
+        int visibleCharacterCount)
+    {
+        long completedTimestamp = Stopwatch.GetTimestamp();
+        long frameTicks = completedTimestamp - frameStartedTimestamp;
+        long allocatedBytes = Math.Max(
+            0,
+            GC.GetAllocatedBytesForCurrentThread() -
+            frameStartedAllocatedBytes);
+        if (_performanceWindowStartTimestamp == 0)
+        {
+            _performanceWindowStartTimestamp = frameStartedTimestamp;
+        }
+
+        _performanceFrameCount++;
+        _performanceFrameTicks += frameTicks;
+        _performanceMaximumFrameTicks = Math.Max(
+            _performanceMaximumFrameTicks,
+            frameTicks);
+        _performanceAllocatedBytes += allocatedBytes;
+
+        double windowSeconds =
+            (completedTimestamp - _performanceWindowStartTimestamp) /
+            (double)Stopwatch.Frequency;
+        if (windowSeconds < PerformanceWindowSeconds)
+        {
+            return;
+        }
+
+        double actualFrameRate = _performanceFrameCount / windowSeconds;
+        double averageFrameMilliseconds =
+            _performanceFrameTicks * 1000.0 /
+            Stopwatch.Frequency /
+            _performanceFrameCount;
+        double maximumFrameMilliseconds =
+            _performanceMaximumFrameTicks * 1000.0 /
+            Stopwatch.Frequency;
+        long allocatedBytesPerFrame =
+            _performanceAllocatedBytes / _performanceFrameCount;
+        AppLogger.Write(
+            nameof(NativeCharacterRenderHost),
+            $"performance target-fps={_targetFrameRate} " +
+            $"actual-fps={actualFrameRate:F2} " +
+            $"visible={visibleCharacterCount} " +
+            $"avg-frame-ms={averageFrameMilliseconds:F3} " +
+            $"max-frame-ms={maximumFrameMilliseconds:F3} " +
+            $"allocated-bytes-per-frame={allocatedBytesPerFrame}");
+
+        _performanceWindowStartTimestamp = completedTimestamp;
+        _performanceFrameTicks = 0;
+        _performanceMaximumFrameTicks = 0;
+        _performanceAllocatedBytes = 0;
+        _performanceFrameCount = 0;
     }
 
     private void UpdateSurfacePosition(NativeCharacterState state)
@@ -731,36 +890,18 @@ public sealed class NativeCharacterRenderHost :
         if (_window == null)
             return;
 
-        List<Rectangle> regions = [];
-        Rectangle[] workingAreas =
-            System.Windows.Forms.Screen.AllScreens
-                .Select(screen => ToClientPixelRectangle(
-                    screen.WorkingArea,
-                    _window.DpiScale,
-                    _window.Left,
-                    _window.Top))
-                .ToArray();
+        _interactiveRegions.Clear();
+        RefreshWorkingAreas();
         foreach (NativeCharacterState state in _states.Values)
         {
             if (!state.IsVisible)
                 continue;
 
-            foreach (RectangleF screenBounds in new[]
-                     {
-                         state.PreviousWindowRegionBounds,
-                         state.WindowRegionBounds
-                     })
+            AddClippedWindowRegion(state.PreviousWindowRegionBounds);
+            if (state.WindowRegionBounds !=
+                state.PreviousWindowRegionBounds)
             {
-                Rectangle visibleBounds = GetWindowRegionBounds(
-                    screenBounds,
-                    _window.Left,
-                    _window.Top);
-                foreach (Rectangle visibleRegion in ClipToWorkingAreas(
-                             visibleBounds,
-                             workingAreas))
-                {
-                    regions.Add(visibleRegion);
-                }
+                AddClippedWindowRegion(state.WindowRegionBounds);
             }
         }
 
@@ -782,7 +923,19 @@ public sealed class NativeCharacterRenderHost :
         {
             int clientX = screenPoint.X - _window.Left;
             int clientY = screenPoint.Y - _window.Top;
-            if (regions.Any(region => region.Contains(clientX, clientY)))
+            bool pointInsideRegion = false;
+            foreach (Rectangle region in _interactiveRegions)
+            {
+                if (!region.Contains(clientX, clientY))
+                {
+                    continue;
+                }
+
+                pointInsideRegion = true;
+                break;
+            }
+
+            if (pointInsideRegion)
             {
                 passThroughHole =
                     new Rectangle(clientX, clientY, 1, 1);
@@ -790,8 +943,61 @@ public sealed class NativeCharacterRenderHost :
         }
 
         _window.SetInteractiveRegions(
-            regions,
+            _interactiveRegions,
             passThroughHole);
+    }
+
+    private void AddClippedWindowRegion(RectangleF screenBounds)
+    {
+        if (_window == null)
+        {
+            return;
+        }
+
+        Rectangle visibleBounds = GetWindowRegionBounds(
+            screenBounds,
+            _window.Left,
+            _window.Top);
+        foreach (Rectangle workingArea in _workingAreas)
+        {
+            Rectangle visibleRegion = Rectangle.Intersect(
+                visibleBounds,
+                workingArea);
+            if (visibleRegion.Width > 0 && visibleRegion.Height > 0)
+            {
+                _interactiveRegions.Add(visibleRegion);
+            }
+        }
+    }
+
+    private void RefreshWorkingAreas()
+    {
+        if (_window == null)
+        {
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        if (_workingAreas.Count > 0 &&
+            Stopwatch.GetElapsedTime(
+                _workingAreasRefreshTimestamp,
+                now) < WorkingAreaRefreshInterval)
+        {
+            return;
+        }
+
+        _workingAreas.Clear();
+        foreach (System.Windows.Forms.Screen screen in
+                 System.Windows.Forms.Screen.AllScreens)
+        {
+            _workingAreas.Add(ToClientPixelRectangle(
+                screen.WorkingArea,
+                _window.DpiScale,
+                _window.Left,
+                _window.Top));
+        }
+
+        _workingAreasRefreshTimestamp = now;
     }
 
     internal static RectangleF GetSurfaceScreenBounds(
@@ -1026,7 +1232,7 @@ public sealed class NativeCharacterRenderHost :
              batchIndex--)
         {
             NativeSpineDrawBatch batch = state.LastBatches[batchIndex];
-            for (int triangle = batch.Indices.Length - 3;
+            for (int triangle = batch.IndexCount - 3;
                  triangle >= 0;
                  triangle -= 3)
             {
@@ -1181,6 +1387,11 @@ public sealed class NativeCharacterRenderHost :
         _pointerDragging = false;
         _pointerMovePending = false;
     }
+
+    private readonly record struct PendingFrame(
+        NativeCharacterState State,
+        IReadOnlyList<NativeSpineDrawBatch> Batches,
+        float PixelScale);
 
     private struct NativePoint
     {

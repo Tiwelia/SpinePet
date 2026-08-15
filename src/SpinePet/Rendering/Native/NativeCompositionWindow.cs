@@ -45,8 +45,10 @@ internal sealed class NativeCompositionWindow : IDisposable
         $"SpinePet.NativeComposition.{Environment.ProcessId}";
     private static ushort _windowClass;
 
-    private Rectangle[]? _interactiveRegions;
+    private readonly List<Rectangle> _interactiveRegions = [];
+    private readonly List<Rectangle> _normalizedRegionBuffer = [];
     private Rectangle? _passThroughHole;
+    private bool _hasInteractiveRegions;
     private bool _inputEnabled;
 
     public NativeCompositionWindow()
@@ -103,23 +105,40 @@ internal sealed class NativeCompositionWindow : IDisposable
             return;
 
         Rectangle windowBounds = new(0, 0, Width, Height);
-        Rectangle[] normalizedPhysical = regions
-            .Select(region => Rectangle.Intersect(windowBounds, region))
-            .Where(region => region.Width > 0 && region.Height > 0)
-            .ToArray();
-        Rectangle[] normalized = normalizedPhysical
-            .OrderBy(region => region.X)
-            .ThenBy(region => region.Y)
-            .ThenBy(region => region.Width)
-            .ThenBy(region => region.Height)
-            .ToArray();
+        _normalizedRegionBuffer.Clear();
+        foreach (Rectangle region in regions)
+        {
+            Rectangle normalized = Rectangle.Intersect(
+                windowBounds,
+                region);
+            if (normalized.Width > 0 && normalized.Height > 0)
+            {
+                _normalizedRegionBuffer.Add(normalized);
+            }
+        }
+
+        _normalizedRegionBuffer.Sort(static (left, right) =>
+        {
+            int comparison = left.X.CompareTo(right.X);
+            if (comparison != 0)
+                return comparison;
+            comparison = left.Y.CompareTo(right.Y);
+            if (comparison != 0)
+                return comparison;
+            comparison = left.Width.CompareTo(right.Width);
+            return comparison != 0
+                ? comparison
+                : left.Height.CompareTo(right.Height);
+        });
         Rectangle? normalizedHole = passThroughHole is { } hole
             ? Rectangle.Intersect(windowBounds, hole)
             : null;
         if (normalizedHole is { Width: <= 0 } or { Height: <= 0 })
             normalizedHole = null;
-        if (_interactiveRegions != null &&
-            _interactiveRegions.SequenceEqual(normalized) &&
+        if (_hasInteractiveRegions &&
+            RegionsEqual(
+                _interactiveRegions,
+                _normalizedRegionBuffer) &&
             _passThroughHole == normalizedHole)
         {
             return;
@@ -132,7 +151,7 @@ internal sealed class NativeCompositionWindow : IDisposable
         bool transferred = false;
         try
         {
-            foreach (Rectangle rectangle in normalized)
+            foreach (Rectangle rectangle in _normalizedRegionBuffer)
             {
                 IntPtr part = CreateRectRgn(
                     rectangle.Left,
@@ -198,8 +217,10 @@ internal sealed class NativeCompositionWindow : IDisposable
                 redraw: false) != 0;
             if (transferred)
             {
-                _interactiveRegions = normalized;
+                _interactiveRegions.Clear();
+                _interactiveRegions.AddRange(_normalizedRegionBuffer);
                 _passThroughHole = normalizedHole;
+                _hasInteractiveRegions = true;
             }
         }
         finally
@@ -207,6 +228,26 @@ internal sealed class NativeCompositionWindow : IDisposable
             if (!transferred)
                 DeleteObject(combinedRegion);
         }
+    }
+
+    private static bool RegionsEqual(
+        List<Rectangle> left,
+        List<Rectangle> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < left.Count; index++)
+        {
+            if (left[index] != right[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public void SetInputEnabled(bool enabled)

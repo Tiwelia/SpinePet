@@ -1,4 +1,4 @@
-# Batch-process all character folders in a single session.
+# Batch-process all standing resource folders in a single session.
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$ResourceDirectory,
@@ -36,6 +36,11 @@ $folders = Get-ChildItem `
     -Directory `
     -Recurse |
     Where-Object {
+        [string]::Equals(
+            $_.Name,
+            'standing',
+            [System.StringComparison]::OrdinalIgnoreCase
+        ) -and
         (Get-ChildItem -LiteralPath $_.FullName -Filter '*.atlas') -and
         (Get-ChildItem -LiteralPath $_.FullName -Filter '*.skel') -and
         (Get-ChildItem -LiteralPath $_.FullName -Filter '*.png')
